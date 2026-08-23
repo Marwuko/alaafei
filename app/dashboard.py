@@ -195,7 +195,7 @@ async function refresh(){
         (stats.escalated===1?" referral needs":" referrals need")+" follow up now</span>";
       lead.innerHTML = s + ".";
     }
-    const t=[["Completion","%s%%".replace("%s",stats.completion_pct)],
+    const t=[["Completion",stats.completion_pct+"%"],
       ["Open now",stats.open_count],
       ["Needs follow up",stats.escalated],
       ["Median hours to arrival",stats.median_hours ?? "no data yet"]];
