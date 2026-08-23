@@ -55,3 +55,33 @@ async def test_escalation():
     async with SessionLocal() as s:
         ref = await s.get(Referral, ref.id)
         assert ref.status == ReferralStatus.ESCALATED
+
+
+@pytest.mark.asyncio
+async def test_priority_ranking():
+    from app.prioritization.rules import compute_priorities
+
+    await flow.handle_inbound_text(NURSE, f"REFER Amina | heavy bleeding | {CAREGIVER}")
+    await flow.handle_inbound_text(NURSE, "REFER Fusheini | mild cough | ")
+    await flow.handle_inbound_text(NURSE, f"REFER Zeinab | fever | {CAREGIVER}")
+
+    async with SessionLocal() as s:
+        refs = (await s.execute(select(Referral))).scalars().all()
+        by_name = {r.patient_name: r for r in refs}
+        by_name["Amina"].notified_at = utcnow() - timedelta(hours=72)
+        await s.commit()
+
+    await flow.escalate_overdue()
+
+    async with SessionLocal() as s:
+        items = await compute_priorities(s)
+
+    assert items[0].patient_name == "Amina"
+    assert any("escalated" in r for r in items[0].reasons)
+    fusheini = next(i for i in items if i.patient_name == "Fusheini")
+    assert any("no phone" in r for r in fusheini.reasons)
+
+
+@pytest.mark.asyncio
+async def test_priority_command_for_unknown_number():
+    await flow.handle_inbound_text("233000000000", "PRIORITY")

@@ -30,7 +30,8 @@ HELP = (
     "Alaafei commands:\n"
     "REFER name | danger sign | caregiver number\n"
     "ARRIVED referral-id\n"
-    "CLOSE referral-id"
+    "CLOSE referral-id\n"
+    "PRIORITY - your ranked visit list"
 )
 
 
@@ -44,6 +45,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _confirm_arrival(sender, text[8:])
     elif upper.startswith("CLOSE "):
         await _close_referral(sender, text[6:])
+    elif upper == "PRIORITY":
+        await _send_priority_list(sender)
     else:
         await send_text(sender, HELP)
 
@@ -142,6 +145,20 @@ async def _close_referral(sender: str, payload: str) -> None:
         referral.status = ReferralStatus.CLOSED
         await session.commit()
     await send_text(sender, f"Referral #{rid} closed. Well done.")
+
+
+async def _send_priority_list(sender: str) -> None:
+    from app.prioritization.rules import compute_priorities, format_priority_message
+
+    async with SessionLocal() as session:
+        nurse = (
+            await session.execute(select(Nurse).where(Nurse.wa_number == sender))
+        ).scalar_one_or_none()
+        if nurse is None:
+            await send_text(sender, "This number is not registered as a nurse yet.")
+            return
+        items = await compute_priorities(session)
+    await send_text(sender, format_priority_message(items))
 
 
 async def escalate_overdue() -> None:
