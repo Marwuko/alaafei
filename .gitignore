@@ -6,3 +6,4 @@ venv/
 *.db
 .pytest_cache/
 .DS_Store
+test_alaafei.db

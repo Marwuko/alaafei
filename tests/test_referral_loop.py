@@ -1,4 +1,9 @@
 """End-to-end: register -> notify -> confirm; and escalation of overdue."""
+import os
+
+# Tests get their own throwaway database — never the dev/live one.
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_alaafei.db"
+
 
 from datetime import timedelta
 
