@@ -13,14 +13,14 @@ GRAPH = "https://graph.facebook.com/v20.0"
 
 # clip name -> uploaded media id (filled in after uploading Naomi's recordings)
 VOICE_CLIPS: dict[str, str] = {
-    "welcome": "",
-    "transport_reminder": "",
-    "danger_signs_pregnancy": "",
-    "danger_signs_child": "",
-    "arrival_thanks": "",
-    "gentle_nudge": "",
-    "feeding_6_23m": "",
-    "anc_reminder": "",
+    "welcome": "3297559947101211",
+    "transport_reminder": "1725538528681509",
+    "danger_signs_pregnancy": "1442806201023781",
+    "danger_signs_child": "2792219334495324",
+    "arrival_thanks": "905028172252739",
+    "gentle_nudge": "821747367695902",
+    "feeding_6_23m": "1582357836920422",
+    "anc_reminder": "1775338793780598",
 }
 
 
