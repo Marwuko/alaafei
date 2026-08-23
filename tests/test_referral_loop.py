@@ -90,3 +90,21 @@ async def test_priority_ranking():
 @pytest.mark.asyncio
 async def test_priority_command_for_unknown_number():
     await flow.handle_inbound_text("233000000000", "PRIORITY")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_stats():
+    from app.dashboard import compute_stats
+
+    await flow.handle_inbound_text(NURSE, f"REFER Amina | heavy bleeding | {CAREGIVER}")
+    await flow.handle_inbound_text(NURSE, f"REFER Zeinab | fever | {CAREGIVER}")
+    async with SessionLocal() as s:
+        ref = (await s.execute(select(Referral))).scalars().first()
+    await flow.handle_inbound_text(FACILITY, f"ARRIVED {ref.id}")
+
+    async with SessionLocal() as s:
+        stats, rows = await compute_stats(s)
+    assert stats.total == 2
+    assert stats.arrived == 1
+    assert stats.completion_pct == 50
+    assert len(rows) == 2
