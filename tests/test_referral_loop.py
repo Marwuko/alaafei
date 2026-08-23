@@ -82,7 +82,7 @@ async def test_priority_ranking():
         items = await compute_priorities(s)
 
     assert items[0].patient_name == "Amina"
-    assert any("escalated" in r for r in items[0].reasons)
+    assert any("never confirmed" in r for r in items[0].reasons)
     fusheini = next(i for i in items if i.patient_name == "Fusheini")
     assert any("no phone" in r for r in fusheini.reasons)
 

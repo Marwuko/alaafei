@@ -187,8 +187,8 @@ async def escalate_overdue() -> None:
             await session.commit()
             await send_text(
                 nurse.wa_number,
-                f"ALERT — referral #{referral.id} ({referral.patient_name}, "
-                f"{referral.danger_sign}) has NOT been confirmed at the facility "
+                f"ALERT: referral {referral.id} for {referral.patient_name} with "
+                f"{referral.danger_sign} has not been confirmed at the facility "
                 f"after {settings.escalation_hours}h. Please follow up with "
                 f"{household.caregiver_name} in {household.community}.",
             )

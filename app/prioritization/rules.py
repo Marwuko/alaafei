@@ -74,23 +74,23 @@ async def compute_priorities(session, limit: int = 5) -> list[PriorityItem]:
         )
 
         if ref.status == ReferralStatus.ESCALATED:
-            item.add(100, "referral escalated — never confirmed at facility")
+            item.add(100, "this referral was never confirmed at the facility. Please follow up first")
         elif ref.status == ReferralStatus.CAREGIVER_NOTIFIED and ref.notified_at:
             age = now - _as_utc(ref.notified_at)
             if age > timedelta(hours=24):
                 hours = int(age.total_seconds() // 3600)
-                item.add(60, f"referral pending {hours}h without confirmation")
+                item.add(60, f"referral not yet confirmed after {hours} hours")
             else:
-                item.add(20, "referral in progress — monitor")
+                item.add(20, "referral is in progress, keep an eye on it")
         else:
-            item.add(30, "referral registered, caregiver not yet notified")
+            item.add(30, "referral registered, caregiver not yet reminded")
 
         sign = ref.danger_sign.lower()
         if any(k in sign for k in HIGH_RISK_SIGNS):
-            item.add(25, f"high-risk danger sign: {ref.danger_sign}")
+            item.add(25, f"serious danger sign: {ref.danger_sign}")
 
         if household is not None and not household.caregiver_number:
-            item.add(15, "household has no phone — needs in-person visit")
+            item.add(15, "this family has no phone, so they need a visit in person")
 
         items.append(item)
 
@@ -100,11 +100,11 @@ async def compute_priorities(session, limit: int = 5) -> list[PriorityItem]:
 
 def format_priority_message(items: list[PriorityItem]) -> str:
     if not items:
-        return "No open referrals. All families accounted for — well done."
-    lines = ["Good morning. Your priority visits today:"]
+        return "No open referrals today. All your families are accounted for. Well done."
+    lines = ["Good morning. Here are your priority visits for today:"]
     for rank, item in enumerate(items, start=1):
         reasons = "; ".join(item.reasons)
         lines.append(
-            f"{rank}. {item.patient_name} ({item.community}) — #{item.referral_id}\n   Why: {reasons}"
+            f"{rank}. {item.patient_name}, {item.community} (referral {item.referral_id})\n   Reason: {reasons}"
         )
     return "\n".join(lines)
