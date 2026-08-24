@@ -42,7 +42,14 @@ HELP = (
     "ARRIVED referral-id\n"
     "CLOSE referral-id\n"
     "PRIORITY - your ranked visit list\n"
-    "JOIN your name - register yourself as a nurse"
+    "JOIN your name - register yourself as a nurse\n"
+    "\n"
+    "Voice guidance (add a number, or leave blank to get it yourself):\n"
+    "FEEDING - feeding for 6-23 months\n"
+    "DANGER - danger signs in pregnancy\n"
+    "CHILD - danger signs in a child\n"
+    "ANC - antenatal visit reminder\n"
+    "TRANSPORT - getting to the facility"
 )
 
 
@@ -65,6 +72,16 @@ async def handle_inbound_text(sender: str, body: str) -> None:
     elif upper in ("NO", "N", "CANCEL"):
         _PENDING.pop(sender, None)
         await send_text(sender, "Cancelled. Nothing was registered.")
+    elif upper.startswith("FEEDING"):
+        await _send_advice(sender, text[7:], "feeding_6_23m", "feeding guidance")
+    elif upper.startswith("DANGER"):
+        await _send_advice(sender, text[6:], "danger_signs_pregnancy", "danger signs")
+    elif upper.startswith("CHILD"):
+        await _send_advice(sender, text[5:], "danger_signs_child", "child danger signs")
+    elif upper.startswith("ANC"):
+        await _send_advice(sender, text[3:], "anc_reminder", "ANC reminder")
+    elif upper.startswith("TRANSPORT"):
+        await _send_advice(sender, text[9:], "transport_reminder", "transport reminder")
     elif await _is_caregiver(sender):
         await _serve_caregiver(sender)
     else:
@@ -302,3 +319,26 @@ async def _serve_caregiver(sender: str) -> None:
     """Their reply opened the 24h window -- now the voice can go through."""
     await send_voice_note_bilingual(sender, clip="welcome")
     await send_voice_note_bilingual(sender, clip="transport_reminder")
+
+
+def _normalise(num: str) -> str:
+    n = "".join(ch for ch in num if ch.isdigit())
+    if n.startswith("0"):
+        n = "233" + n[1:]
+    return n
+
+
+async def _send_advice(sender: str, payload: str, clip: str, label: str) -> None:
+    """Send a guidance voice note. No number -> send to the nurse herself so
+    she can play it to a household that has no phone."""
+    target = _normalise(payload)
+    if not target:
+        await send_voice_note_bilingual(sender, clip=clip)
+        await send_text(sender, f"Sent you the {label} to play for the family.")
+        return
+    await send_voice_note_bilingual(target, clip=clip)
+    await send_text(
+        sender,
+        f"Sent the {label} to {target}. If they have not messaged Alaafei "
+        "recently it may not reach them - play it to them yourself instead.",
+    )
