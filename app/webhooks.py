@@ -65,6 +65,14 @@ async def _process_once(msg: dict) -> None:
     wa_id = msg.get("id", "")
     sender = msg.get("from", "")
     body = (msg.get("text") or {}).get("body", "")
+    if not body:
+        # Button taps arrive as interactive replies, not text.
+        inter = msg.get("interactive") or {}
+        reply = inter.get("button_reply") or inter.get("list_reply") or {}
+        body = reply.get("id", "")
+    if not body and msg.get("button"):
+        # Template quick-reply buttons come through differently again.
+        body = msg["button"].get("payload") or msg["button"].get("text", "")
     if not wa_id or not sender:
         return
 

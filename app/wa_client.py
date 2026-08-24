@@ -143,3 +143,35 @@ async def send_facility_template(
             },
         )
         print("[facility template]", r.status_code, r.text[:250], flush=True)
+
+
+async def send_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> bool:
+    """Up to 3 tappable reply buttons. buttons = [(id, label), ...].
+    The tapped id comes back exactly as if the person typed it."""
+    if not settings.whatsapp_access_token:
+        print(f"[DEV send_buttons] to={to}: {body} {buttons}")
+        return True
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": body[:1024]},
+                    "action": {
+                        "buttons": [
+                            {"type": "reply", "reply": {"id": bid, "title": label[:20]}}
+                            for bid, label in buttons[:3]
+                        ]
+                    },
+                },
+            },
+        )
+    if r.status_code != 200 or "error" in r.text:
+        print(f"[send_buttons FAILED] to={to} {r.status_code} {r.text[:200]}", flush=True)
+        return False
+    return True

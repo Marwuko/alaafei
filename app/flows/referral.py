@@ -24,8 +24,10 @@ from app.models import (
     ReferralStatus,
     utcnow,
 )
+from app.ai.caregiver import understand_caregiver
 from app.ai.parse import parse_referral
 from app.wa_client import (
+    send_buttons,
     send_facility_template,
     send_referral_template,
     send_text,
@@ -35,6 +37,8 @@ from app.wa_client import (
 
 # sender -> parsed referral awaiting YES confirmation
 _PENDING: dict[str, dict] = {}
+# caregiver numbers that were sent a template and owe us a first reply
+_AWAITING_VOICE: set[str] = set()
 
 HELP = (
     "Alaafei commands:\n"
@@ -72,6 +76,23 @@ async def handle_inbound_text(sender: str, body: str) -> None:
     elif upper in ("NO", "N", "CANCEL"):
         _PENDING.pop(sender, None)
         await send_text(sender, "Cancelled. Nothing was registered.")
+    elif upper == "MENU_REFER":
+        await send_text(
+            sender,
+            "Type the referral in your own words, for example:\n\n"
+            "Fuseina at Kpalsogu is bleeding heavily, "
+            "call her husband on 0242675709\n\n"
+            "Or use: REFER name | danger sign | number",
+        )
+    elif upper == "MENU_VOICE":
+        await send_buttons(
+            sender,
+            "Which voice guidance? It will come to you in Dagbani and English, "
+            "or add a number to send it to a family.",
+            [("FEEDING", "Feeding 6-23m"),
+             ("DANGER", "Danger signs"),
+             ("TRANSPORT", "Getting there")],
+        )
     elif upper.startswith("FEEDING"):
         await _send_advice(sender, text[7:], "feeding_6_23m", "feeding guidance")
     elif upper.startswith("DANGER"):
@@ -87,7 +108,13 @@ async def handle_inbound_text(sender: str, body: str) -> None:
     else:
         parsed = await parse_referral(text)
         if parsed is None:
-            await send_text(sender, HELP)
+            await send_buttons(
+                sender,
+                "I did not understand that. What would you like to do?",
+                [("PRIORITY", "My visit list"),
+                 ("MENU_REFER", "Make a referral"),
+                 ("MENU_VOICE", "Send guidance")],
+            )
             return
         _PENDING[sender] = parsed
         num = parsed["caregiver_number"] or "none given"
@@ -174,6 +201,7 @@ async def _register_referral(sender: str, payload: str) -> None:
         session.add(referral)
         await session.commit()
         rid = referral.id
+        nurse_name = nurse.name
         facility_name = facility.name
         facility_number = facility.wa_number
 
@@ -188,12 +216,15 @@ async def _register_referral(sender: str, payload: str) -> None:
         # Cold number: a template is the only thing Meta lets through.
         # Their reply opens the 24h window and the voice notes follow.
         await send_referral_template(caregiver_number, patient, facility_name)
+        _AWAITING_VOICE.add(caregiver_number)
     else:
         await send_voice_note_bilingual(target, clip="welcome")
         await send_voice_note_bilingual(target, clip="transport_reminder")
-    ok = await send_text(
+    ok = await send_buttons(
         facility_number,
-        f"Incoming referral #{rid}: {patient} — {danger}. Reply ARRIVED {rid} when they arrive.",
+        f"Incoming referral #{rid}: {patient} — {danger}.\n"
+        f"From {nurse_name}. Tap below when she reaches you.",
+        [(f"ARRIVED {rid}", "She has arrived")],
     )
     if not ok:
         # Facility window closed -- template is the only way in.
@@ -318,13 +349,15 @@ async def _is_caregiver(sender: str) -> bool:
 async def _serve_caregiver(sender: str, text: str) -> None:
     """First message opens the 24h window and earns the voice notes.
     Anything after that is a question -- relay it to the facility and nurse."""
-    async with SessionLocal() as session:
-        seen = (
-            await session.execute(
-                select(MessageLog).where(MessageLog.from_number == sender)
-            )
-        ).scalars().all()
-    if len(seen) <= 1:
+    if text.strip().upper() == "CARE_AGAIN":
+        await send_voice_note_bilingual(sender, clip="welcome")
+        await send_voice_note_bilingual(sender, clip="transport_reminder")
+        return
+    if text.strip().upper() == "CARE_HELP":
+        await _relay_to_facility(sender, "The family says they need help.")
+        return
+    if sender in _AWAITING_VOICE:
+        _AWAITING_VOICE.discard(sender)
         await send_text(
             sender,
             "Thank you. Here is a message from your nurse - it plays in "
@@ -332,13 +365,24 @@ async def _serve_caregiver(sender: str, text: str) -> None:
         )
         await send_voice_note_bilingual(sender, clip="welcome")
         await send_voice_note_bilingual(sender, clip="transport_reminder")
-        await send_text(
+        await send_buttons(
             sender,
-            "If you need anything, just send a message here and the health "
-            "centre will see it.",
+            "If you need anything, tap below or send a message here.",
+            [("CARE_AGAIN", "Play again"),
+             ("CARE_HELP", "I need help")],
         )
         return
-    await _relay_to_facility(sender, text)
+    plan = await understand_caregiver(text)
+    if plan is None:
+        # Model unavailable -- relay everything rather than drop it.
+        await _relay_to_facility(sender, text)
+        return
+    await send_text(sender, plan["reply"])
+    if plan["notify"]:
+        note = plan["summary"] or text
+        if plan["urgent"]:
+            note = "URGENT: " + note
+        await _relay_to_facility(sender, note)
 
 
 async def _relay_to_facility(sender: str, text: str) -> None:
@@ -370,10 +414,7 @@ async def _relay_to_facility(sender: str, text: str) -> None:
     )
     reached = await send_text(facility.wa_number, note)
     await send_text(nurse.wa_number, note)
-    if reached:
-        await send_text(sender, "Your message has been sent to the health centre.")
-    else:
-        await send_text(sender, "Your message has been sent to your nurse.")
+    _ = reached
 
 
 def _normalise(num: str) -> str:
