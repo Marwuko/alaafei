@@ -480,7 +480,12 @@ async def _serve_facility(sender: str, text: str) -> None:
             await session.execute(
                 select(Referral)
                 .where(Referral.facility_id == facility.id)
-                .order_by(Referral.id.desc())
+                .where(
+                    Referral.status.notin_(
+                        [ReferralStatus.ARRIVED, ReferralStatus.CLOSED]
+                    )
+                )
+                .order_by(Referral.id.asc())
                 .limit(3)
             )
         ).scalars().all()
@@ -488,12 +493,13 @@ async def _serve_facility(sender: str, text: str) -> None:
     if not recent:
         await send_text(
             sender,
-            f"{fname}: no referrals yet. You will get a message here "
-            "when a nurse sends someone.",
+            f"{fname}: everyone referred has been confirmed. "
+            "You will get a message here when a nurse sends someone.",
         )
         return
     await send_buttons(
         sender,
-        f"{fname}. Tap a name when that person reaches you.",
+        f"{fname}. Still waiting on these. Tap a name when that person "
+        f"reaches you, or type ARRIVED and the number for anyone else.",
         [(f"ARRIVED {rid}", f"{name} #{rid}"[:20]) for rid, name in recent],
     )
