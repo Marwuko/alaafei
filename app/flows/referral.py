@@ -83,7 +83,7 @@ async def handle_inbound_text(sender: str, body: str) -> None:
     elif upper.startswith("TRANSPORT"):
         await _send_advice(sender, text[9:], "transport_reminder", "transport reminder")
     elif await _is_caregiver(sender):
-        await _serve_caregiver(sender)
+        await _serve_caregiver(sender, text)
     else:
         parsed = await parse_referral(text)
         if parsed is None:
@@ -315,10 +315,65 @@ async def _is_caregiver(sender: str) -> bool:
         return hh is not None
 
 
-async def _serve_caregiver(sender: str) -> None:
-    """Their reply opened the 24h window -- now the voice can go through."""
-    await send_voice_note_bilingual(sender, clip="welcome")
-    await send_voice_note_bilingual(sender, clip="transport_reminder")
+async def _serve_caregiver(sender: str, text: str) -> None:
+    """First message opens the 24h window and earns the voice notes.
+    Anything after that is a question -- relay it to the facility and nurse."""
+    async with SessionLocal() as session:
+        seen = (
+            await session.execute(
+                select(MessageLog).where(MessageLog.from_number == sender)
+            )
+        ).scalars().all()
+    if len(seen) <= 1:
+        await send_text(
+            sender,
+            "Thank you. Here is a message from your nurse - it plays in "
+            "Dagbani, then English.",
+        )
+        await send_voice_note_bilingual(sender, clip="welcome")
+        await send_voice_note_bilingual(sender, clip="transport_reminder")
+        await send_text(
+            sender,
+            "If you need anything, just send a message here and the health "
+            "centre will see it.",
+        )
+        return
+    await _relay_to_facility(sender, text)
+
+
+async def _relay_to_facility(sender: str, text: str) -> None:
+    """Pass a caregiver's message to the facility and the referring nurse."""
+    async with SessionLocal() as session:
+        household = (
+            await session.execute(
+                select(Household).where(Household.caregiver_number == sender)
+            )
+        ).scalars().first()
+        referral = (
+            await session.execute(
+                select(Referral)
+                .where(Referral.household_id == household.id)
+                .order_by(Referral.id.desc())
+            )
+        ).scalars().first()
+        if referral is None:
+            await send_text(sender, "Thank you. Your nurse will be in touch.")
+            return
+        facility = await session.get(Facility, referral.facility_id)
+        nurse = await session.get(Nurse, referral.nurse_id)
+
+    note = (
+        f"Message from the family of {referral.patient_name} "
+        f"(referral #{referral.id}, {household.community}):\n\n"
+        f'"{text}"\n\n'
+        f"Reply to them on {sender}."
+    )
+    reached = await send_text(facility.wa_number, note)
+    await send_text(nurse.wa_number, note)
+    if reached:
+        await send_text(sender, "Your message has been sent to the health centre.")
+    else:
+        await send_text(sender, "Your message has been sent to your nurse.")
 
 
 def _normalise(num: str) -> str:
@@ -336,6 +391,11 @@ async def _send_advice(sender: str, payload: str, clip: str, label: str) -> None
         await send_voice_note_bilingual(sender, clip=clip)
         await send_text(sender, f"Sent you the {label} to play for the family.")
         return
+    await send_text(
+        target,
+        f"A voice message from your nurse about {label}. "
+        "Listen below - it plays in Dagbani, then English.",
+    )
     await send_voice_note_bilingual(target, clip=clip)
     await send_text(
         sender,
