@@ -32,12 +32,14 @@ VOICE_CLIPS: dict[str, str] = {
 }
 
 
-async def send_text(to: str, body: str) -> None:
+async def send_text(to: str, body: str) -> bool:
+    """Returns True if Meta accepted the send. False means the 24h window is
+    almost certainly closed and a template is needed instead."""
     if not settings.whatsapp_access_token:
         print(f"[DEV send_text] to={to}: {body}")
-        return
+        return True
     async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(
+        r = await client.post(
             f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
             headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
             json={
@@ -47,6 +49,10 @@ async def send_text(to: str, body: str) -> None:
                 "text": {"body": body},
             },
         )
+    if r.status_code != 200 or "error" in r.text:
+        print(f"[send_text FAILED] to={to} {r.status_code} {r.text[:200]}", flush=True)
+        return False
+    return True
 
 
 async def send_voice_note(to: str, clip: str) -> None:
@@ -71,3 +77,69 @@ async def send_voice_note_bilingual(to: str, clip: str) -> None:
     """Send the Dagbani clip, then its English twin."""
     await send_voice_note(to, clip=clip)
     await send_voice_note(to, clip=f"{clip}_en")
+
+
+async def send_referral_template(to: str, caregiver_name: str, facility_name: str) -> None:
+    """Cold-start a caregiver conversation. Works outside the 24h window."""
+    if not settings.whatsapp_access_token:
+        print(f"[DEV send_referral_template] to={to}: {caregiver_name} / {facility_name}")
+        return
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "template",
+                "template": {
+                    "name": "referral_reminder",
+                    "language": {"code": "en"},
+                    "components": [{
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "parameter_name": "caregiver_name",
+                             "text": caregiver_name},
+                            {"type": "text", "parameter_name": "facility_name",
+                             "text": facility_name},
+                        ],
+                    }],
+                },
+            },
+        )
+        print("[template]", r.status_code, r.text[:300])
+
+
+async def send_facility_template(
+    to: str, patient_name: str, danger_sign: str, referral_id: int
+) -> None:
+    """Cold-start the facility desk. Their ARRIVED reply opens the window."""
+    if not settings.whatsapp_access_token:
+        print(f"[DEV send_facility_template] to={to}: #{referral_id} {patient_name}")
+        return
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "template",
+                "template": {
+                    "name": "alaafei_facility_referral",
+                    "language": {"code": "en"},
+                    "components": [{
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "parameter_name": "patient_name",
+                             "text": patient_name},
+                            {"type": "text", "parameter_name": "danger_sign",
+                             "text": danger_sign},
+                            {"type": "text", "parameter_name": "referral_id",
+                             "text": str(referral_id)},
+                        ],
+                    }],
+                },
+            },
+        )
+        print("[facility template]", r.status_code, r.text[:250], flush=True)

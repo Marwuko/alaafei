@@ -25,7 +25,13 @@ from app.models import (
     utcnow,
 )
 from app.ai.parse import parse_referral
-from app.wa_client import send_text, send_voice_note, send_voice_note_bilingual
+from app.wa_client import (
+    send_facility_template,
+    send_referral_template,
+    send_text,
+    send_voice_note,
+    send_voice_note_bilingual,
+)
 
 # sender -> parsed referral awaiting YES confirmation
 _PENDING: dict[str, dict] = {}
@@ -59,6 +65,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
     elif upper in ("NO", "N", "CANCEL"):
         _PENDING.pop(sender, None)
         await send_text(sender, "Cancelled. Nothing was registered.")
+    elif await _is_caregiver(sender):
+        await _serve_caregiver(sender)
     else:
         parsed = await parse_referral(text)
         if parsed is None:
@@ -159,12 +167,20 @@ async def _register_referral(sender: str, payload: str) -> None:
     )
     # Caregiver-facing messages: voice-first, text alongside.
     target = caregiver_number or sender  # no-phone household -> via nurse
-    await send_voice_note_bilingual(target, clip="welcome")
-    await send_voice_note_bilingual(target, clip="transport_reminder")
-    await send_text(
+    if caregiver_number:
+        # Cold number: a template is the only thing Meta lets through.
+        # Their reply opens the 24h window and the voice notes follow.
+        await send_referral_template(caregiver_number, patient, facility_name)
+    else:
+        await send_voice_note_bilingual(target, clip="welcome")
+        await send_voice_note_bilingual(target, clip="transport_reminder")
+    ok = await send_text(
         facility_number,
         f"Incoming referral #{rid}: {patient} — {danger}. Reply ARRIVED {rid} when they arrive.",
     )
+    if not ok:
+        # Facility window closed -- template is the only way in.
+        await send_facility_template(facility_number, patient, danger, rid)
 
     async with SessionLocal() as session:
         ref = await session.get(Referral, rid)
@@ -264,3 +280,25 @@ def _parse_id(payload: str) -> int | None:
         return int(payload.strip().split()[0])
     except (ValueError, IndexError):
         return None
+
+
+async def _is_caregiver(sender: str) -> bool:
+    """True if this number is a caregiver on some household and not a nurse."""
+    async with SessionLocal() as session:
+        nurse = (
+            await session.execute(select(Nurse).where(Nurse.wa_number == sender))
+        ).scalar_one_or_none()
+        if nurse is not None:
+            return False
+        hh = (
+            await session.execute(
+                select(Household).where(Household.caregiver_number == sender)
+            )
+        ).scalars().first()
+        return hh is not None
+
+
+async def _serve_caregiver(sender: str) -> None:
+    """Their reply opened the 24h window -- now the voice can go through."""
+    await send_voice_note_bilingual(sender, clip="welcome")
+    await send_voice_note_bilingual(sender, clip="transport_reminder")

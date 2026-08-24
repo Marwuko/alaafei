@@ -50,8 +50,13 @@ async def inbound(request: Request):
     data = await request.json()
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
-            for msg in change.get("value", {}).get("messages", []):
+            value = change.get("value", {})
+            for msg in value.get("messages", []):
                 await _process_once(msg)
+            for st in value.get("statuses", []):
+                errs = st.get("errors") or []
+                print(f"[status] {st.get('status')} to={st.get('recipient_id')} "
+                      f"id={st.get('id','')[-12:]} errors={errs}", flush=True)
     # Always 200 fast: slow responses trigger Meta retries.
     return {"status": "ok"}
 
