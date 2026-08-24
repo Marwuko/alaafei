@@ -31,7 +31,8 @@ HELP = (
     "REFER name | danger sign | caregiver number\n"
     "ARRIVED referral-id\n"
     "CLOSE referral-id\n"
-    "PRIORITY - your ranked visit list"
+    "PRIORITY - your ranked visit list\n"
+    "JOIN your name - register yourself as a nurse"
 )
 
 
@@ -45,10 +46,39 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _confirm_arrival(sender, text[8:])
     elif upper.startswith("CLOSE "):
         await _close_referral(sender, text[6:])
+    elif upper.startswith("JOIN "):
+        await _join_as_nurse(sender, text[5:])
     elif upper == "PRIORITY":
         await _send_priority_list(sender)
     else:
         await send_text(sender, HELP)
+
+
+async def _join_as_nurse(sender: str, payload: str) -> None:
+    """Self-registration so a new CHPS nurse can onboard from the phone."""
+    parts = [p.strip() for p in payload.split("|")]
+    name = parts[0]
+    zone = parts[1] if len(parts) > 1 and parts[1] else "Demo Zone"
+    if not name:
+        await send_text(sender, "Format: JOIN your name")
+        return
+    async with SessionLocal() as session:
+        existing = (
+            await session.execute(select(Nurse).where(Nurse.wa_number == sender))
+        ).scalar_one_or_none()
+        if existing is not None:
+            await send_text(
+                sender,
+                f"You are already registered as {existing.name} ({existing.chps_zone}).",
+            )
+            return
+        session.add(Nurse(name=name, wa_number=sender, chps_zone=zone))
+        await session.commit()
+    await send_text(
+        sender,
+        f"Welcome {name}. You are registered for {zone}.\n"
+        "Try: REFER Amina | heavy bleeding | caregiver number",
+    )
 
 
 async def _register_referral(sender: str, payload: str) -> None:
