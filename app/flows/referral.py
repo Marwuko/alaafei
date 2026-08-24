@@ -103,6 +103,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _send_advice(sender, text[3:], "anc_reminder", "ANC reminder")
     elif upper.startswith("TRANSPORT"):
         await _send_advice(sender, text[9:], "transport_reminder", "transport reminder")
+    elif await _is_facility(sender):
+        await _serve_facility(sender, text)
     elif await _is_caregiver(sender):
         await _serve_caregiver(sender, text)
     else:
@@ -405,16 +407,26 @@ async def _relay_to_facility(sender: str, text: str) -> None:
             return
         facility = await session.get(Facility, referral.facility_id)
         nurse = await session.get(Nurse, referral.nurse_id)
+        rid = referral.id
+        patient = referral.patient_name
+        community = household.community
+        facility_number = facility.wa_number
+        nurse_number = nurse.wa_number
 
     note = (
-        f"Message from the family of {referral.patient_name} "
-        f"(referral #{referral.id}, {household.community}):\n\n"
+        f"Message from the family of {patient} "
+        f"(referral #{rid}, {community}):\n\n"
         f'"{text}"\n\n'
         f"Reply to them on {sender}."
     )
-    reached = await send_text(facility.wa_number, note)
-    await send_text(nurse.wa_number, note)
-    _ = reached
+    reached = await send_text(facility_number, note)
+    if not reached:
+        # 24h window shut. The template is the only way through.
+        await send_facility_template(
+            facility_number, patient, " ".join(text.split())[:60], rid
+        )
+        print(f"[relay] window closed, template sent for #{rid}", flush=True)
+    await send_text(nurse_number, note)
 
 
 def _normalise(num: str) -> str:
@@ -442,4 +454,46 @@ async def _send_advice(sender: str, payload: str, clip: str, label: str) -> None
         sender,
         f"Sent the {label} to {target}. If they have not messaged Alaafei "
         "recently it may not reach them - play it to them yourself instead.",
+    )
+
+
+async def _is_facility(sender: str) -> bool:
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                select(Facility).where(Facility.wa_number == sender)
+            )
+        ).scalars().first()
+    return row is not None
+
+
+async def _serve_facility(sender: str, text: str) -> None:
+    """A facility desk is not a nurse. It confirms arrivals, nothing else."""
+    async with SessionLocal() as session:
+        facility = (
+            await session.execute(
+                select(Facility).where(Facility.wa_number == sender)
+            )
+        ).scalars().first()
+        fname = facility.name
+        rows = (
+            await session.execute(
+                select(Referral)
+                .where(Referral.facility_id == facility.id)
+                .order_by(Referral.id.desc())
+                .limit(3)
+            )
+        ).scalars().all()
+        recent = [(r.id, r.patient_name) for r in rows]
+    if not recent:
+        await send_text(
+            sender,
+            f"{fname}: no referrals yet. You will get a message here "
+            "when a nurse sends someone.",
+        )
+        return
+    await send_buttons(
+        sender,
+        f"{fname}. Tap a name when that person reaches you.",
+        [(f"ARRIVED {rid}", f"{name} #{rid}"[:20]) for rid, name in recent],
     )
