@@ -105,124 +105,174 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Alaafei. Referral watch</title>
+<title>Alaafei · Referral watch</title>
 <style>
 :root{
-  --ink:#1F2A24; --paper:#FAF8F3; --leaf:#1B7A55; --harmattan:#C75B39;
-  --sand:#E7E0D2; --khaki:#6B7263;
+  --ink:#16211C; --paper:#F7F5EF; --card:#FFFFFF; --leaf:#126B49;
+  --leaf-soft:#E4F0EA; --harmattan:#C04A28; --harm-soft:#FBE8E1;
+  --sand:#E4DDCD; --khaki:#727A6B;
 }
 *{box-sizing:border-box;margin:0}
 body{background:var(--paper);color:var(--ink);
   font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:0 0 4rem}
-header{display:flex;justify-content:space-between;align-items:baseline;
-  padding:1.4rem 2rem;border-bottom:2px solid var(--ink)}
-header h1{font-size:1.15rem;font-weight:800;letter-spacing:.01em}
-header h1 span{color:var(--leaf)}
-.stamp{font-size:.78rem;color:var(--khaki);font-variant-numeric:tabular-nums}
-main{max-width:960px;margin:0 auto;padding:0 2rem}
-.lead{padding:2.2rem 0 1.6rem;border-bottom:1px solid var(--sand)}
-.lead p{font-size:1.7rem;font-weight:650;line-height:1.25;max-width:34ch}
-.lead p strong{color:var(--leaf);font-variant-numeric:tabular-nums}
-.lead p .bad{color:var(--harmattan)}
-.tiles{display:flex;gap:2.5rem;padding:1.2rem 0 1.6rem;flex-wrap:wrap}
-.tile .n{font-size:1.5rem;font-weight:750;font-variant-numeric:tabular-nums}
-.tile .l{font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;color:var(--khaki)}
-table{width:100%;border-collapse:collapse;margin-top:.4rem}
-th{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--khaki);
-  text-align:left;padding:.55rem .6rem .45rem;border-bottom:1px solid var(--ink)}
-td{padding:.7rem .6rem;border-bottom:1px solid var(--sand);font-size:.92rem;vertical-align:top}
-td.num{font-variant-numeric:tabular-nums;color:var(--khaki)}
-.sign{color:var(--khaki);font-size:.82rem}
-.loop{display:flex;gap:.35rem;align-items:center;margin-top:.15rem}
-.dot{width:.55rem;height:.55rem;border-radius:50%;background:var(--sand)}
-.dot.on{background:var(--leaf)}
-.dot.alert{background:var(--harmattan)}
-.seg{flex:0 0 1.1rem;height:2px;background:var(--sand)}
-.seg.on{background:var(--leaf)}
-.seg.alert{background:var(--harmattan)}
-.state{font-size:.78rem;font-weight:650}
-.state.arrived,.state.closed{color:var(--leaf)}
-.state.escalated{color:var(--harmattan)}
-.state.registered,.state.notified{color:var(--khaki)}
-.empty{padding:3rem 0;color:var(--khaki);font-size:1.05rem}
+header{display:flex;justify-content:space-between;align-items:center;
+  padding:1.1rem 2rem;background:var(--ink);color:var(--paper)}
+header h1{font-size:1.05rem;font-weight:750;letter-spacing:.01em}
+header h1 span{color:#7FD4AC}
+.stamp{font-size:.75rem;opacity:.75;font-variant-numeric:tabular-nums;
+  display:flex;align-items:center;gap:.45rem}
+.pulse{width:.5rem;height:.5rem;border-radius:50%;background:#7FD4AC}
+.pulse.flash{animation:ping .9s ease-out}
+@keyframes ping{0%{transform:scale(1);opacity:1}
+  50%{transform:scale(2.4);opacity:.35}100%{transform:scale(1);opacity:1}}
+main{max-width:1000px;margin:0 auto;padding:0 2rem}
+.hero{display:flex;align-items:center;gap:2.2rem;padding:2rem 0 1.4rem;flex-wrap:wrap}
+.ring{position:relative;width:118px;height:118px;flex:0 0 auto}
+.ring svg{transform:rotate(-90deg)}
+.ring .val{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center}
+.ring .val b{font-size:1.6rem;font-weight:780;font-variant-numeric:tabular-nums;line-height:1}
+.ring .val i{font-style:normal;font-size:.62rem;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--khaki);margin-top:.15rem}
+.hero-copy h2{font-size:1.45rem;font-weight:700;line-height:1.25;max-width:26ch}
+.hero-copy .sub{color:var(--khaki);font-size:.92rem;margin-top:.4rem}
+.hero-copy .alarm{color:var(--harmattan);font-weight:650}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:.8rem;padding:.4rem 0 1.6rem}
+.tile{background:var(--card);border:1px solid var(--sand);border-radius:10px;padding:.85rem 1rem}
+.tile .n{font-size:1.45rem;font-weight:750;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile .l{font-size:.66rem;text-transform:uppercase;letter-spacing:.11em;
+  color:var(--khaki);margin-top:.3rem}
+.tile.warn{background:var(--harm-soft);border-color:#EFC7B7}
+.tile.warn .n{color:var(--harmattan)}
+.sec{font-size:.68rem;text-transform:uppercase;letter-spacing:.13em;
+  color:var(--khaki);margin:1.2rem 0 .6rem}
+.card{background:var(--card);border:1px solid var(--sand);border-radius:10px;
+  padding:.9rem 1.1rem;margin-bottom:.6rem;display:flex;gap:1.1rem;
+  align-items:center;flex-wrap:wrap;transition:background .5s}
+.card.new{background:var(--leaf-soft)}
+.card.urgent{border-color:#EFC7B7;background:var(--harm-soft)}
+.card .id{font-variant-numeric:tabular-nums;color:var(--khaki);font-size:.8rem;
+  flex:0 0 2.2rem;font-weight:650}
+.card .who{flex:1 1 190px;min-width:0}
+.card .who b{font-size:1rem;font-weight:700}
+.card .who div{color:var(--khaki);font-size:.83rem}
+.card .where{flex:1 1 170px;font-size:.83rem;color:var(--khaki)}
+.track{flex:1 1 260px;display:flex;align-items:flex-start;gap:0}
+.step{flex:1;text-align:center;position:relative}
+.step .bead{width:.7rem;height:.7rem;border-radius:50%;background:var(--sand);
+  margin:0 auto .3rem;position:relative;z-index:1}
+.step.done .bead{background:var(--leaf)}
+.step.miss .bead{background:var(--harmattan)}
+.step .cap{font-size:.62rem;letter-spacing:.04em;color:var(--khaki);line-height:1.25}
+.step.done .cap{color:var(--leaf);font-weight:650}
+.step.miss .cap{color:var(--harmattan);font-weight:650}
+.step:not(:first-child):before{content:"";position:absolute;height:2px;
+  background:var(--sand);top:.29rem;right:50%;left:-50%}
+.step.done:not(:first-child):before{background:var(--leaf)}
+.step.miss:not(:first-child):before{background:var(--harmattan)}
+.waited{flex:0 0 auto;font-size:.75rem;color:var(--khaki);
+  font-variant-numeric:tabular-nums;text-align:right;min-width:5.5rem}
+.card.urgent .waited{color:var(--harmattan);font-weight:650}
+.empty{padding:3rem 0;color:var(--khaki)}
 @media (max-width:640px){main,header{padding-left:1rem;padding-right:1rem}
-  .lead p{font-size:1.3rem}.hide-sm{display:none}}
+  .hero-copy h2{font-size:1.2rem}.where{display:none}}
 </style>
 </head>
 <body>
 <header>
   <h1>Alaafei <span>·</span> Savelugu district referral watch</h1>
-  <div class="stamp" id="stamp">loading</div>
+  <div class="stamp"><span class="pulse" id="pulse"></span><span id="stamp">connecting</span></div>
 </header>
 <main>
-  <div class="lead"><p id="lead">Loading referrals…</p></div>
+  <div class="hero">
+    <div class="ring">
+      <svg width="118" height="118">
+        <circle cx="59" cy="59" r="50" fill="none" stroke="#E4DDCD" stroke-width="10"/>
+        <circle id="arc" cx="59" cy="59" r="50" fill="none" stroke="#126B49"
+          stroke-width="10" stroke-linecap="round" stroke-dasharray="314"
+          stroke-dashoffset="314" style="transition:stroke-dashoffset .8s ease"/>
+      </svg>
+      <div class="val"><b id="pct">0%</b><i>arrived</i></div>
+    </div>
+    <div class="hero-copy">
+      <h2 id="lead">Loading referrals…</h2>
+      <div class="sub" id="sub"></div>
+    </div>
+  </div>
   <div class="tiles" id="tiles"></div>
-  <div id="tablewrap"></div>
+  <div class="sec" id="sechead"></div>
+  <div id="list"></div>
 </main>
 <script>
-const STATES = ["registered","notified","arrived"];
-function loopTrack(status){
-  if(status==="closed") status="arrived";
-  let html = '<div class="loop">';
-  const idx = STATES.indexOf(status);
-  const alert = status==="escalated";
-  STATES.forEach((s,i)=>{
-    const reached = alert ? i<2 : i<=idx;
-    const cls = alert && i===2 ? "dot alert" : (reached ? "dot on" : "dot");
-    if(i>0){
-      const segReached = alert ? i<=2 : i<=idx;
-      html += '<div class="'+(alert && i===2 ? "seg alert" : (segReached ? "seg on" : "seg"))+'"></div>';
-    }
-    html += '<div class="'+cls+'"></div>';
-  });
-  return html + '</div>';
+const STEPS=[["registered","referred"],["notified","family told"],
+             ["arrived","arrived"],["closed","closed"]];
+let seen={};
+function track(status){
+  const order=["registered","notified","arrived","closed"];
+  const esc = status==="escalated";
+  const idx = esc ? 1 : order.indexOf(status);
+  return '<div class="track">'+STEPS.map(([k,cap],i)=>{
+    let cls="step";
+    if(esc && i===2) cls+=" miss";
+    else if(i<=idx) cls+=" done";
+    if(esc && i===2) cap="overdue";
+    return '<div class="'+cls+'"><div class="bead"></div><div class="cap">'+cap+'</div></div>';
+  }).join("")+'</div>';
 }
-function stateLabel(s){
-  const words = {registered:"registered", notified:"family reminded",
-    arrived:"arrived", closed:"closed", escalated:"needs follow up"};
-  return '<span class="state '+s+'">'+(words[s]||s)+'</span>';
+function hrs(reg){
+  const d=new Date(reg.replace(" ","T")+"Z");
+  if(isNaN(d)) return "";
+  const h=(Date.now()-d.getTime())/36e5;
+  if(h<1) return Math.round(h*60)+" min ago";
+  if(h<48) return h.toFixed(1)+" h ago";
+  return Math.round(h/24)+" d ago";
 }
 async function refresh(){
   try{
-    const res = await fetch("/dashboard/data");
-    const {stats, rows} = await res.json();
-    const lead = document.getElementById("lead");
+    const res=await fetch("/dashboard/data");
+    const {stats,rows}=await res.json();
+    const pct=stats.completion_pct||0;
+    document.getElementById("pct").textContent=pct+"%";
+    document.getElementById("arc").setAttribute("stroke-dashoffset",314-(314*pct/100));
+    const lead=document.getElementById("lead"), sub=document.getElementById("sub");
     if(stats.total===0){
-      lead.innerHTML = "No referrals yet. The first one a nurse registers will appear here.";
-    } else {
-      let s = "<strong>"+stats.arrived+" of "+stats.total+"</strong> referred families confirmed arrived";
-      if(stats.escalated>0) s += ", and <span class='bad'>"+stats.escalated+
-        (stats.escalated===1?" referral needs":" referrals need")+" follow up now</span>";
-      lead.innerHTML = s + ".";
+      lead.textContent="No referrals yet.";
+      sub.textContent="The first one a nurse registers will appear here.";
+    }else{
+      lead.innerHTML=stats.arrived+" of "+stats.total+" referred families reached care.";
+      sub.innerHTML = stats.escalated>0
+        ? '<span class="alarm">'+stats.escalated+(stats.escalated===1?" referral needs":" referrals need")+
+          ' follow up now.</span> Every one is being tracked until it closes.'
+        : "Every open referral is being tracked until it closes.";
     }
-    const t=[["Completion",stats.completion_pct+"%"],
-      ["Open now",stats.open_count],
-      ["Needs follow up",stats.escalated],
-      ["Median hours to arrival",stats.median_hours ?? "no data yet"]];
-    document.getElementById("tiles").innerHTML =
-      t.map(([l,n])=>'<div class="tile"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>').join("");
-    if(rows.length){
-      document.getElementById("tablewrap").innerHTML =
-        '<table><tr><th>Referral</th><th>Patient</th><th class="hide-sm">Community</th>'+
-        '<th class="hide-sm">Facility</th><th>Journey</th><th class="hide-sm">Registered</th></tr>'+
-        rows.map(r=>'<tr><td class="num">'+r.id+'</td>'+
-          '<td>'+r.patient+'<div class="sign">'+r.danger_sign+'</div></td>'+
-          '<td class="hide-sm">'+r.community+'</td>'+
-          '<td class="hide-sm">'+r.facility+'</td>'+
-          '<td>'+stateLabel(r.status)+loopTrack(r.status)+'</td>'+
-          '<td class="num hide-sm">'+r.registered+'</td></tr>').join("")+'</table>';
-    } else {
-      document.getElementById("tablewrap").innerHTML =
-        '<div class="empty">Nothing to show yet.</div>';
-    }
-    document.getElementById("stamp").textContent =
-      "live · updated "+new Date().toLocaleTimeString();
+    const t=[["Open now",stats.open_count,""],
+             ["Needs follow up",stats.escalated,stats.escalated>0?"warn":""],
+             ["Median hours to arrival",stats.median_hours ?? "—",""],
+             ["Completion",pct+"%",""]];
+    document.getElementById("tiles").innerHTML=t.map(([l,n,c])=>
+      '<div class="tile '+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>').join("");
+    const rank={escalated:0,registered:1,notified:2,arrived:3,closed:4};
+    rows.sort((a,b)=>(rank[a.status]??9)-(rank[b.status]??9)||b.id-a.id);
+    document.getElementById("sechead").textContent=rows.length?"Referral journeys":"";
+    document.getElementById("list").innerHTML = rows.length ? rows.map(r=>{
+      const fresh = seen[r.id] && seen[r.id]!==r.status;
+      const cls="card"+(r.status==="escalated"?" urgent":"")+(fresh?" new":"");
+      seen[r.id]=r.status;
+      return '<div class="'+cls+'"><div class="id">#'+r.id+'</div>'+
+        '<div class="who"><b>'+r.patient+'</b><div>'+r.danger_sign+'</div></div>'+
+        '<div class="where">'+r.community+' → '+r.facility+'</div>'+
+        track(r.status)+'<div class="waited">'+hrs(r.registered)+'</div></div>';
+    }).join("") : '<div class="empty">Nothing to show yet.</div>';
+    const p=document.getElementById("pulse");
+    p.classList.remove("flash"); void p.offsetWidth; p.classList.add("flash");
+    document.getElementById("stamp").textContent="live · "+new Date().toLocaleTimeString();
   }catch(e){
-    document.getElementById("stamp").textContent = "connection lost, retrying";
+    document.getElementById("stamp").textContent="connection lost, retrying";
   }
 }
 refresh();
-setInterval(refresh, 10000);
+setInterval(refresh,5000);
 </script>
 </body>
 </html>"""
