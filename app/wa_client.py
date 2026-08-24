@@ -13,14 +13,22 @@ GRAPH = "https://graph.facebook.com/v20.0"
 
 # clip name -> uploaded media id (filled in after uploading Naomi's recordings)
 VOICE_CLIPS: dict[str, str] = {
-    "welcome": "3297559947101211",
-    "transport_reminder": "1725538528681509",
-    "danger_signs_pregnancy": "1442806201023781",
-    "danger_signs_child": "2792219334495324",
-    "arrival_thanks": "905028172252739",
-    "gentle_nudge": "821747367695902",
-    "feeding_6_23m": "1582357836920422",
-    "anc_reminder": "1775338793780598",
+    "welcome": "2835447660157535",
+    "transport_reminder": "2300158304082115",
+    "danger_signs_pregnancy": "1583415133238627",
+    "danger_signs_child": "1388906453345789",
+    "arrival_thanks": "2522061161625087",
+    "gentle_nudge": "1543193877065027",
+    "feeding_6_23m": "1083919747695152",
+    "anc_reminder": "2243884623072950",
+    "welcome_en": "1623342495798409",
+    "transport_reminder_en": "1586146593177142",
+    "danger_signs_pregnancy_en": "27969055916108626",
+    "danger_signs_child_en": "1559679862861992",
+    "arrival_thanks_en": "1720349382544596",
+    "gentle_nudge_en": "28024960783824492",
+    "feeding_6_23m_en": "3070504789809648",
+    "anc_reminder_en": "25889003290796652",
 }
 
 
@@ -57,3 +65,9 @@ async def send_voice_note(to: str, clip: str) -> None:
                 "audio": {"id": media_id},
             },
         )
+
+
+async def send_voice_note_bilingual(to: str, clip: str) -> None:
+    """Send the Dagbani clip, then its English twin."""
+    await send_voice_note(to, clip=clip)
+    await send_voice_note(to, clip=f"{clip}_en")

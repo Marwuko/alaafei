@@ -24,7 +24,7 @@ from app.models import (
     ReferralStatus,
     utcnow,
 )
-from app.wa_client import send_text, send_voice_note
+from app.wa_client import send_text, send_voice_note, send_voice_note_bilingual
 
 HELP = (
     "Alaafei commands:\n"
@@ -96,8 +96,8 @@ async def _register_referral(sender: str, payload: str) -> None:
     )
     # Caregiver-facing messages: voice-first, text alongside.
     target = caregiver_number or sender  # no-phone household -> via nurse
-    await send_voice_note(target, clip="welcome")
-    await send_voice_note(target, clip="transport_reminder")
+    await send_voice_note_bilingual(target, clip="welcome")
+    await send_voice_note_bilingual(target, clip="transport_reminder")
     await send_text(
         facility_number,
         f"Incoming referral #{rid}: {patient} — {danger}. Reply ARRIVED {rid} when they arrive.",
@@ -129,7 +129,7 @@ async def _confirm_arrival(sender: str, payload: str) -> None:
     await send_text(sender, f"Referral #{rid} confirmed. Thank you.")
     await send_text(nurse_number, f"Good news: referral #{rid} ({referral.patient_name}) has arrived.")
     if household.caregiver_number:
-        await send_voice_note(household.caregiver_number, clip="arrival_thanks")
+        await send_voice_note_bilingual(household.caregiver_number, clip="arrival_thanks")
 
 
 async def _close_referral(sender: str, payload: str) -> None:
@@ -193,7 +193,7 @@ async def escalate_overdue() -> None:
                 f"{household.caregiver_name} in {household.community}.",
             )
             if household.caregiver_number:
-                await send_voice_note(household.caregiver_number, clip="gentle_nudge")
+                await send_voice_note_bilingual(household.caregiver_number, clip="gentle_nudge")
 
 
 def _parse_id(payload: str) -> int | None:

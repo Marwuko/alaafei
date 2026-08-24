@@ -13,11 +13,12 @@ with open(".env") as f:
         if line.startswith("WHATSAPP_PHONE_NUMBER_ID="):
             PHONE_ID = line.split("=", 1)[1].strip()
 
-CLIPS = [
+_BASE = [
     "welcome", "transport_reminder", "danger_signs_pregnancy",
     "danger_signs_child", "arrival_thanks", "gentle_nudge",
     "feeding_6_23m", "anc_reminder",
 ]
+CLIPS = _BASE + [c + "_en" for c in _BASE]
 
 ids = {}
 for clip in CLIPS:
