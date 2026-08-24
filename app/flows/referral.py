@@ -24,7 +24,11 @@ from app.models import (
     ReferralStatus,
     utcnow,
 )
+from app.ai.parse import parse_referral
 from app.wa_client import send_text, send_voice_note, send_voice_note_bilingual
+
+# sender -> parsed referral awaiting YES confirmation
+_PENDING: dict[str, dict] = {}
 
 HELP = (
     "Alaafei commands:\n"
@@ -50,8 +54,37 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _join_as_nurse(sender, text[5:])
     elif upper == "PRIORITY":
         await _send_priority_list(sender)
+    elif upper in ("YES", "Y", "OK"):
+        await _confirm_pending(sender)
+    elif upper in ("NO", "N", "CANCEL"):
+        _PENDING.pop(sender, None)
+        await send_text(sender, "Cancelled. Nothing was registered.")
     else:
+        parsed = await parse_referral(text)
+        if parsed is None:
+            await send_text(sender, HELP)
+            return
+        _PENDING[sender] = parsed
+        num = parsed["caregiver_number"] or "none given"
+        await send_text(
+            sender,
+            f"I understood:\n"
+            f"Patient: {parsed['patient']}\n"
+            f"Danger sign: {parsed['danger_sign']}\n"
+            f"Caregiver: {num}\n\n"
+            "Reply YES to register, NO to cancel.",
+        )
+
+
+async def _confirm_pending(sender: str) -> None:
+    parsed = _PENDING.pop(sender, None)
+    if parsed is None:
         await send_text(sender, HELP)
+        return
+    payload = f"{parsed['patient']} | {parsed['danger_sign']}"
+    if parsed["caregiver_number"]:
+        payload += f" | {parsed['caregiver_number']}"
+    await _register_referral(sender, payload)
 
 
 async def _join_as_nurse(sender: str, payload: str) -> None:

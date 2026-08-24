@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     whatsapp_access_token: str = ""
     whatsapp_phone_number_id: str = ""
     escalation_hours: int = 48
+    anthropic_api_key: str = ""
 
 
 settings = Settings()
