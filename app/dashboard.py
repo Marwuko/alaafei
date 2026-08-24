@@ -88,6 +88,7 @@ async def compute_stats(session) -> tuple[Stats, list[dict]]:
                 "facility": facility.name if facility else "",
                 "status": r.status.value,
                 "registered": _as_utc(r.created_at).strftime("%d %b %H:%M"),
+                "registered_iso": _as_utc(r.created_at).isoformat(),
             }
         )
     return stats, rows
@@ -221,7 +222,7 @@ function track(status){
   }).join("")+'</div>';
 }
 function hrs(reg){
-  const d=new Date(reg.replace(" ","T")+"Z");
+  const d=new Date(reg);
   if(isNaN(d)) return "";
   const h=(Date.now()-d.getTime())/36e5;
   if(h<1) return Math.round(h*60)+" min ago";
@@ -262,7 +263,7 @@ async function refresh(){
       return '<div class="'+cls+'"><div class="id">#'+r.id+'</div>'+
         '<div class="who"><b>'+r.patient+'</b><div>'+r.danger_sign+'</div></div>'+
         '<div class="where">'+r.community+' → '+r.facility+'</div>'+
-        track(r.status)+'<div class="waited">'+hrs(r.registered)+'</div></div>';
+        track(r.status)+'<div class="waited">'+hrs(r.registered_iso)+'</div></div>';
     }).join("") : '<div class="empty">Nothing to show yet.</div>';
     const p=document.getElementById("pulse");
     p.classList.remove("flash"); void p.offsetWidth; p.classList.add("flash");
