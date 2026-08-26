@@ -28,6 +28,7 @@ from app.ai.caregiver import understand_caregiver
 from app.ai.parse import parse_referral
 from app.wa_client import (
     send_buttons,
+    send_list,
     send_facility_template,
     send_referral_template,
     send_text,
@@ -103,6 +104,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _send_advice(sender, text[3:], "anc_reminder", "ANC reminder")
     elif upper.startswith("TRANSPORT"):
         await _send_advice(sender, text[9:], "transport_reminder", "transport reminder")
+    elif upper == "NO_ARRIVALS":
+        await _no_arrivals(sender)
     elif await _is_facility(sender):
         await _serve_facility(sender, text)
     elif await _is_caregiver(sender):
@@ -486,10 +489,18 @@ async def _serve_facility(sender: str, text: str) -> None:
                     )
                 )
                 .order_by(Referral.id.asc())
-                .limit(3)
+                .limit(9)
             )
         ).scalars().all()
-        recent = [(r.id, r.patient_name) for r in rows]
+        recent = [
+            (
+                r.id,
+                r.patient_name,
+                r.danger_sign,
+                getattr(r, "referred_at", None) or getattr(r, "created_at", None),
+            )
+            for r in rows
+        ]
     if not recent:
         await send_text(
             sender,
@@ -497,9 +508,79 @@ async def _serve_facility(sender: str, text: str) -> None:
             "You will get a message here when a nurse sends someone.",
         )
         return
-    await send_buttons(
+    now = utcnow()
+    listrows = []
+    for rid, name, sign, ts in recent:
+        listrows.append((f"ARRIVED {rid}", f"{name} #{rid}", f"{sign}{_waited(ts, now)}"))
+    listrows.append(
+        ("NO_ARRIVALS", "None have come yet", "Tell the nurses nobody has arrived")
+    )
+    await send_list(
         sender,
-        f"{fname}. Still waiting on these. Tap a name when that person "
-        f"reaches you, or type ARRIVED and the number for anyone else.",
-        [(f"ARRIVED {rid}", f"{name} #{rid}"[:20]) for rid, name in recent],
+        f"{len(recent)} people were referred here and have not been "
+        "confirmed. Open the list and pick one when they reach you.",
+        "Confirm arrival",
+        listrows,
+        header=fname,
+    )
+
+
+def _waited(ts, now) -> str:
+    if ts is None:
+        return ""
+    # SQLite hands back naive datetimes; utcnow() is aware.
+    if ts.tzinfo is None and now.tzinfo is not None:
+        ts = ts.replace(tzinfo=now.tzinfo)
+    elif ts.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=ts.tzinfo)
+    hours = (now - ts).total_seconds() / 3600
+    if hours < 1:
+        return " · just now"
+    if hours < 24:
+        return f" · waiting {int(hours)}h"
+    return f" · waiting {int(hours // 24)}d"
+
+
+async def _no_arrivals(sender: str) -> None:
+    """The desk says nobody has turned up. Tell the referring nurses now
+    instead of waiting for the escalation sweep."""
+    async with SessionLocal() as session:
+        facility = (
+            await session.execute(
+                select(Facility).where(Facility.wa_number == sender)
+            )
+        ).scalars().first()
+        rows = (
+            await session.execute(
+                select(Referral)
+                .where(Referral.facility_id == facility.id)
+                .where(
+                    Referral.status.notin_(
+                        [ReferralStatus.ARRIVED, ReferralStatus.CLOSED]
+                    )
+                )
+            )
+        ).scalars().all()
+        pending = []
+        for r in rows:
+            r.status = ReferralStatus.ESCALATED
+            r.escalated_at = utcnow()
+            nurse = await session.get(Nurse, r.nurse_id)
+            household = await session.get(Household, r.household_id)
+            pending.append(
+                (nurse.wa_number, r.id, r.patient_name, household.caregiver_name,
+                 household.community)
+            )
+        await session.commit()
+        fname = facility.name
+    for wa_number, rid, patient, caregiver, community in pending:
+        await send_text(
+            wa_number,
+            f"{fname} says referral {rid} for {patient} has still not "
+            f"arrived. Please follow up with {caregiver} in {community}.",
+        )
+    await send_text(
+        sender,
+        f"Thank you. {len(pending)} nurses have been told nobody has "
+        "reached you yet.",
     )

@@ -145,6 +145,57 @@ async def send_facility_template(
         print("[facility template]", r.status_code, r.text[:250], flush=True)
 
 
+async def send_list(
+    to: str,
+    body: str,
+    button_label: str,
+    rows: list[tuple[str, str, str]],
+    header: str | None = None,
+) -> bool:
+    """A single button that opens a sheet of up to 10 rows.
+    rows = [(id, title, description), ...]. The tapped id comes back
+    exactly as if the person typed it."""
+    if not settings.whatsapp_access_token:
+        print(f"[DEV send_list] to={to}: {body} {rows}")
+        return True
+    interactive = {
+        "type": "list",
+        "body": {"text": body[:1024]},
+        "action": {
+            "button": button_label[:20],
+            "sections": [
+                {
+                    "rows": [
+                        {
+                            "id": rid[:200],
+                            "title": title[:24],
+                            "description": desc[:72],
+                        }
+                        for rid, title, desc in rows[:10]
+                    ]
+                }
+            ],
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header[:60]}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "interactive",
+                "interactive": interactive,
+            },
+        )
+    if r.status_code != 200 or "error" in r.text:
+        print(f"[send_list FAILED] to={to} {r.status_code} {r.text[:200]}", flush=True)
+        return False
+    return True
+
+
 async def send_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> bool:
     """Up to 3 tappable reply buttons. buttons = [(id, label), ...].
     The tapped id comes back exactly as if the person typed it."""
