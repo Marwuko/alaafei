@@ -110,10 +110,14 @@ async def send_referral_template(to: str, caregiver_name: str, facility_name: st
         print("[template]", r.status_code, r.text[:300])
 
 
+from app.wa_window import remember_template
+
+
 async def send_facility_template(
     to: str, patient_name: str, danger_sign: str, referral_id: int
 ) -> None:
     """Cold-start the facility desk. Their ARRIVED reply opens the window."""
+    await remember_template(to, referral_id)
     if not settings.whatsapp_access_token:
         print(f"[DEV send_facility_template] to={to}: #{referral_id} {patient_name}")
         return

@@ -17,6 +17,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.flows.referral import handle_inbound_text
 from app.models import MessageLog
+from app.thread import flush as thread_flush
 from app.wa_window import mark_inbound
 
 router = APIRouter()
@@ -78,6 +79,7 @@ async def _process_once(msg: dict) -> None:
         return
 
     await mark_inbound(sender)
+    await thread_flush(sender)
 
     async with SessionLocal() as session:
         session.add(MessageLog(wa_message_id=wa_id, from_number=sender, body=body))

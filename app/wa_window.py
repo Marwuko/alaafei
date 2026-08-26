@@ -54,3 +54,32 @@ async def window_open(wa_number: str) -> bool:
     elif ts.tzinfo is not None and now.tzinfo is None:
         now = now.replace(tzinfo=ts.tzinfo)
     return (now - ts) < WINDOW
+
+
+async def remember_template(wa_number: str, referral_id: int) -> None:
+    """A template carries no state back to us -- its Quick Reply button sends
+    a fixed payload. Record what the last template to this number was about so
+    the tap can be resolved."""
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "INSERT INTO template_context (wa_number, referral_id, sent_at) "
+                "VALUES (:n, :r, :t) "
+                "ON CONFLICT(wa_number) DO UPDATE SET referral_id = :r, sent_at = :t"
+            ),
+            {"n": wa_number, "r": referral_id, "t": utcnow()},
+        )
+        await session.commit()
+
+
+async def last_template_referral(wa_number: str) -> int | None:
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT referral_id FROM template_context WHERE wa_number = :n"
+                ),
+                {"n": wa_number},
+            )
+        ).first()
+    return row[0] if row else None

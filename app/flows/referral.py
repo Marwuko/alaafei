@@ -15,7 +15,8 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
-from app.wa_window import window_open
+from app import thread
+from app.wa_window import last_template_referral, window_open
 from app.models import (
     Facility,
     Household,
@@ -65,6 +66,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
 
     if upper.startswith("REFER "):
         await _register_referral(sender, text[6:])
+    elif upper.startswith("REPLY "):
+        await _reply_to_family(sender, text[6:])
     elif upper.startswith("ARRIVED "):
         await _confirm_arrival(sender, text[8:])
     elif upper.startswith("CLOSE "):
@@ -105,6 +108,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _send_advice(sender, text[3:], "anc_reminder", "ANC reminder")
     elif upper.startswith("TRANSPORT"):
         await _send_advice(sender, text[9:], "transport_reminder", "transport reminder")
+    elif upper in ("QUICK REPLY", "QUICK_REPLY"):
+        await _quick_reply(sender)
     elif upper == "NO_ARRIVALS":
         await _no_arrivals(sender)
     elif await _is_facility(sender):
@@ -253,6 +258,17 @@ async def _confirm_arrival(sender: str, payload: str) -> None:
         if referral is None:
             await send_text(sender, f"No referral #{rid} found.")
             return
+        # Only the facility sees the patient walk in. A nurse confirming an
+        # arrival is guessing, and a wrong guess drops the referral off the
+        # follow-up list entirely.
+        facility = await session.get(Facility, referral.facility_id)
+        if facility is None or facility.wa_number != sender:
+            await send_text(
+                sender,
+                f"Only {facility.name if facility else 'the facility'} can "
+                f"confirm that referral {rid} has arrived.",
+            )
+            return
         referral.status = ReferralStatus.ARRIVED
         referral.arrived_at = utcnow()
         await session.commit()
@@ -384,10 +400,15 @@ async def _serve_caregiver(sender: str, text: str) -> None:
         await _relay_to_facility(sender, text)
         return
     await send_text(sender, plan["reply"])
-    if plan["notify"]:
+    live = await _thread_is_live(sender)
+    if plan["notify"] or live:
         note = plan["summary"] or text
         if plan["urgent"]:
             note = "URGENT: " + note
+        elif not plan["notify"]:
+            # An ordinary reply in a conversation the nurse started. She needs
+            # her answer, so pass the family's own words straight through.
+            note = text
         await _relay_to_facility(sender, note)
 
 
@@ -421,9 +442,10 @@ async def _relay_to_facility(sender: str, text: str) -> None:
         f"Message from the family of {patient} "
         f"(referral #{rid}, {community}):\n\n"
         f'"{text}"\n\n'
-        f"Reply to them on {sender}."
+        f'Type "REPLY {rid}" and your message to answer the family here.'
     )
     summary = " ".join(text.split())[:60]
+    await thread.log(rid, "from_family", sender, text)
     # Check the window before sending. A doomed send still returns 200 and
     # the 131047 only turns up later on the status webhook, so the response
     # tells us nothing.
@@ -595,3 +617,82 @@ async def _no_arrivals(sender: str) -> None:
         f"Thank you. The nurses who sent these {len(pending)} people "
         "have been told nobody has reached you yet.",
     )
+
+
+async def _quick_reply(sender: str) -> None:
+    """The template's button sends a fixed payload, so look up what the last
+    template to this number was about and treat the tap as a confirmation."""
+    rid = await last_template_referral(sender)
+    if rid is None:
+        await send_text(
+            sender,
+            "Reply ARRIVED and the referral number to confirm someone has "
+            "reached you.",
+        )
+        return
+    await _confirm_arrival(sender, str(rid))
+
+
+
+async def _reply_to_family(sender: str, payload: str) -> None:
+    """REPLY 7 come to the clinic this morning -- keeps the nurse and the
+    family in one thread and writes the exchange down."""
+    parts = payload.strip().split(maxsplit=1)
+    rid = _parse_id(parts[0]) if parts else None
+    if rid is None or len(parts) < 2:
+        await send_text(sender, "Format: REPLY referral-id then your message.")
+        return
+    message = parts[1].strip()
+    async with SessionLocal() as session:
+        referral = await session.get(Referral, rid)
+        if referral is None:
+            await send_text(sender, f"No referral #{rid} found.")
+            return
+        nurse = await session.get(Nurse, referral.nurse_id)
+        household = await session.get(Household, referral.household_id)
+        if nurse is None or nurse.wa_number != sender:
+            await send_text(
+                sender, f"Referral {rid} belongs to another nurse."
+            )
+            return
+        caregiver_number = household.caregiver_number
+        nurse_name = nurse.name
+        patient = referral.patient_name
+    if not caregiver_number:
+        await send_text(sender, f"No family number on file for referral {rid}.")
+        return
+    body = f"{nurse_name} (health worker): {message}"
+    sent = await thread.deliver_or_hold(rid, caregiver_number, sender, body)
+    if sent:
+        await send_text(sender, f"Sent to the family of {patient}.")
+    else:
+        await send_text(
+            sender,
+            f"The family of {patient} has not written in for over a day, so "
+            "WhatsApp will not let us message them right now. Your message is "
+            "saved and goes out the moment they write back.",
+        )
+
+
+async def _thread_is_live(sender: str) -> bool:
+    """True when a nurse has already written to this family about their
+    referral. Silence after she asks a question is the worst outcome."""
+    async with SessionLocal() as session:
+        household = (
+            await session.execute(
+                select(Household).where(Household.caregiver_number == sender)
+            )
+        ).scalars().first()
+        if household is None:
+            return False
+        referral = (
+            await session.execute(
+                select(Referral)
+                .where(Referral.household_id == household.id)
+                .order_by(Referral.id.desc())
+            )
+        ).scalars().first()
+        if referral is None:
+            return False
+        rid = referral.id
+    return await thread.nurse_has_spoken(rid)
