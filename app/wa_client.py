@@ -149,6 +149,44 @@ async def send_facility_template(
         print("[facility template]", r.status_code, r.text[:250], flush=True)
 
 
+async def send_nurse_template(
+    to: str, patient_name: str, referral_id: int, message_summary: str
+) -> None:
+    """Reach a nurse whose window has shut. She is not a facility desk, so she
+    gets her own wording: what was said, about whom, and nothing about
+    confirming an arrival she cannot see."""
+    await remember_template(to, referral_id)
+    if not settings.whatsapp_access_token:
+        print(f"[DEV send_nurse_template] to={to}: #{referral_id} {patient_name}")
+        return
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "template",
+                "template": {
+                    "name": "alaafei_family_message",
+                    "language": {"code": "en"},
+                    "components": [{
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "parameter_name": "patient_name",
+                             "text": patient_name},
+                            {"type": "text", "parameter_name": "referral_id",
+                             "text": str(referral_id)},
+                            {"type": "text", "parameter_name": "message_summary",
+                             "text": message_summary},
+                        ],
+                    }],
+                },
+            },
+        )
+        print("[nurse template]", r.status_code, r.text[:250], flush=True)
+
+
 async def send_list(
     to: str,
     body: str,

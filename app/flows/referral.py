@@ -32,6 +32,7 @@ from app.wa_client import (
     send_buttons,
     send_list,
     send_facility_template,
+    send_nurse_template,
     send_referral_template,
     send_text,
     send_voice_note,
@@ -108,6 +109,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _send_advice(sender, text[3:], "anc_reminder", "ANC reminder")
     elif upper.startswith("TRANSPORT"):
         await _send_advice(sender, text[9:], "transport_reminder", "transport reminder")
+    elif upper in ("OPEN THE MESSAGE", "OPEN_THE_MESSAGE"):
+        await _open_message(sender)
     elif upper in ("QUICK REPLY", "QUICK_REPLY"):
         await _quick_reply(sender)
     elif upper == "NO_ARRIVALS":
@@ -459,7 +462,7 @@ async def _relay_to_facility(sender: str, text: str) -> None:
     if await window_open(nurse_number):
         await send_text(nurse_number, note)
     else:
-        await send_facility_template(nurse_number, patient, summary, rid)
+        await send_nurse_template(nurse_number, patient, rid, summary)
         print(f"[relay] nurse window shut, template sent for #{rid}", flush=True)
 
 
@@ -735,3 +738,23 @@ async def _looks_like_bare_reply(sender: str, text: str) -> bool:
         [(command, "Send to family"), ("CANCEL", "No")],
     )
     return True
+
+
+async def _open_message(sender: str) -> None:
+    """The nurse template button. Tapping it reopens her window, so all that
+    is left is to tell her how to answer."""
+    rid = await last_template_referral(sender)
+    if rid is None:
+        await send_text(sender, "Type REPLY and the referral number to answer.")
+        return
+    async with SessionLocal() as session:
+        referral = await session.get(Referral, rid)
+        patient = referral.patient_name if referral else None
+    if patient is None:
+        await send_text(sender, f"Type REPLY {rid} and your message to answer.")
+        return
+    await send_text(
+        sender,
+        f"Referral {rid} for {patient}. Type REPLY {rid} and your message to "
+        "answer, and it will reach them from this number.",
+    )
