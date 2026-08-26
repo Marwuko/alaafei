@@ -116,6 +116,8 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _serve_facility(sender, text)
     elif await _is_caregiver(sender):
         await _serve_caregiver(sender, text)
+    elif await _looks_like_bare_reply(sender, text):
+        return
     else:
         parsed = await parse_referral(text)
         if parsed is None:
@@ -696,3 +698,40 @@ async def _thread_is_live(sender: str) -> bool:
             return False
         rid = referral.id
     return await thread.nurse_has_spoken(rid)
+
+
+async def _looks_like_bare_reply(sender: str, text: str) -> bool:
+    """A nurse typing "7 bring her ANC card" meant REPLY 7. Losing her message
+    to the generic menu is the worst answer, so offer the corrected command as
+    a button. Tapping it sends the exact text she already wrote."""
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) < 2 or not parts[0].isdigit():
+        return False
+    rid = int(parts[0])
+    message = parts[1].strip()
+    async with SessionLocal() as session:
+        referral = await session.get(Referral, rid)
+        if referral is None:
+            return False
+        nurse = await session.get(Nurse, referral.nurse_id)
+        if nurse is None or nurse.wa_number != sender:
+            return False
+        patient = referral.patient_name
+    # Only offer this where a conversation already exists. Otherwise any
+    # sentence that opens with a number gets read as a message to a family.
+    if not await thread.nurse_has_spoken(rid):
+        return False
+    command = f"REPLY {rid} {message}"
+    if len(command) > 200:
+        await send_text(
+            sender,
+            f"To answer the family of {patient}, start your message with "
+            f"REPLY {rid} and send it again.",
+        )
+        return True
+    await send_buttons(
+        sender,
+        f"Send this to the family of {patient}?\n\n{message}",
+        [(command, "Send to family"), ("CANCEL", "No")],
+    )
+    return True
