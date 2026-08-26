@@ -17,6 +17,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.flows.referral import handle_inbound_text
 from app.models import MessageLog
+from app.wa_window import mark_inbound
 
 router = APIRouter()
 
@@ -75,6 +76,8 @@ async def _process_once(msg: dict) -> None:
         body = msg["button"].get("payload") or msg["button"].get("text", "")
     if not wa_id or not sender:
         return
+
+    await mark_inbound(sender)
 
     async with SessionLocal() as session:
         session.add(MessageLog(wa_message_id=wa_id, from_number=sender, body=body))

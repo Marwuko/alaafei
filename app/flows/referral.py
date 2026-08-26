@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
+from app.wa_window import window_open
 from app.models import (
     Facility,
     Household,
@@ -422,14 +423,20 @@ async def _relay_to_facility(sender: str, text: str) -> None:
         f'"{text}"\n\n'
         f"Reply to them on {sender}."
     )
-    reached = await send_text(facility_number, note)
-    if not reached:
-        # 24h window shut. The template is the only way through.
-        await send_facility_template(
-            facility_number, patient, " ".join(text.split())[:60], rid
-        )
-        print(f"[relay] window closed, template sent for #{rid}", flush=True)
-    await send_text(nurse_number, note)
+    summary = " ".join(text.split())[:60]
+    # Check the window before sending. A doomed send still returns 200 and
+    # the 131047 only turns up later on the status webhook, so the response
+    # tells us nothing.
+    if await window_open(facility_number):
+        await send_text(facility_number, note)
+    else:
+        await send_facility_template(facility_number, patient, summary, rid)
+        print(f"[relay] facility window shut, template sent for #{rid}", flush=True)
+    if await window_open(nurse_number):
+        await send_text(nurse_number, note)
+    else:
+        await send_facility_template(nurse_number, patient, summary, rid)
+        print(f"[relay] nurse window shut, template sent for #{rid}", flush=True)
 
 
 def _normalise(num: str) -> str:
