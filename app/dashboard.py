@@ -207,7 +207,7 @@ main{max-width:1000px;margin:0 auto;padding:0 2rem}
   <div id="list"></div>
 </main>
 <script>
-const STEPS=[["registered","referred"],["notified","family told"],
+const STEPS=[["registered","referred"],["notified","message sent"],
              ["arrived","arrived"],["closed","closed"]];
 let seen={};
 function track(status){
