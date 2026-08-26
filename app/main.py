@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.db import engine
 from app.flows.referral import escalate_overdue
 from app.models import Base
+from app.auth import router as auth_router
 from app.dashboard import router as dashboard_router
 from app.webhooks import router as webhook_router
 
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Alaafei", lifespan=lifespan)
 app.include_router(webhook_router)
+app.include_router(auth_router)
 app.include_router(dashboard_router)
 
 

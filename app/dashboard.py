@@ -11,10 +11,11 @@ and called out in the README. District login comes with the pilot.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import Depends, APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 
+from app.auth import require_user
 from app.db import SessionLocal
 from app.models import Facility, Household, Nurse, Referral, ReferralStatus
 
@@ -94,7 +95,7 @@ async def compute_stats(session) -> tuple[Stats, list[dict]]:
     return stats, rows
 
 
-@router.get("/dashboard/data")
+@router.get("/dashboard/data", dependencies=[Depends(require_user)])
 async def dashboard_data():
     async with SessionLocal() as session:
         stats, rows = await compute_stats(session)
@@ -183,7 +184,7 @@ main{max-width:1000px;margin:0 auto;padding:0 2rem}
 <body>
 <header>
   <h1>Alaafei <span>·</span> Savelugu district referral watch</h1>
-  <div class="stamp"><span class="pulse" id="pulse"></span><span id="stamp">connecting</span></div>
+  <div class="stamp"><span class="pulse" id="pulse"></span><span id="stamp">connecting</span><a href="/logout" style="color:inherit;opacity:.65;margin-left:14px;font-size:12px;text-decoration:none">Sign out</a></div>
 </header>
 <main>
   <div class="hero">
@@ -241,7 +242,7 @@ async function refresh(){
       lead.textContent="No referrals yet.";
       sub.textContent="The first one a nurse registers will appear here.";
     }else{
-      lead.innerHTML=stats.arrived+" of "+stats.total+" referred families reached care.";
+      lead.innerHTML=stats.arrived+" of "+stats.total+" referrals reached care.";
       sub.innerHTML = stats.escalated>0
         ? '<span class="alarm">'+stats.escalated+(stats.escalated===1?" referral needs":" referrals need")+
           ' follow up now.</span> Every one is being tracked until it closes.'
@@ -279,6 +280,6 @@ setInterval(refresh,5000);
 </html>"""
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", dependencies=[Depends(require_user)])
 async def dashboard():
     return HTMLResponse(PAGE)
