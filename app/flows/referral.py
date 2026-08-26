@@ -378,7 +378,7 @@ async def _serve_caregiver(sender: str, text: str) -> None:
         await send_voice_note_bilingual(sender, clip="transport_reminder")
         return
     if text.strip().upper() == "CARE_HELP":
-        await _relay_to_facility(sender, "The family says they need help.")
+        await _relay_to_facility(sender, "They tapped I need help.")
         return
     if sender in _AWAITING_VOICE:
         _AWAITING_VOICE.discard(sender)
@@ -441,10 +441,10 @@ async def _relay_to_facility(sender: str, text: str) -> None:
         nurse_number = nurse.wa_number
 
     note = (
-        f"Message from the family of {patient} "
+        f"About {patient} "
         f"(referral #{rid}, {community}):\n\n"
         f'"{text}"\n\n'
-        f'Type "REPLY {rid}" and your message to answer the family here.'
+        f'Type "REPLY {rid}" and your message to answer here.'
     )
     summary = " ".join(text.split())[:60]
     await thread.log(rid, "from_family", sender, text)
@@ -661,18 +661,18 @@ async def _reply_to_family(sender: str, payload: str) -> None:
         nurse_name = nurse.name
         patient = referral.patient_name
     if not caregiver_number:
-        await send_text(sender, f"No family number on file for referral {rid}.")
+        await send_text(sender, f"No contact number on file for referral {rid}.")
         return
     body = f"{nurse_name} (health worker): {message}"
     sent = await thread.deliver_or_hold(rid, caregiver_number, sender, body)
     if sent:
-        await send_text(sender, f"Sent to the family of {patient}.")
+        await send_text(sender, f"Sent on referral {rid} for {patient}.")
     else:
         await send_text(
             sender,
-            f"The family of {patient} has not written in for over a day, so "
-            "WhatsApp will not let us message them right now. Your message is "
-            "saved and goes out the moment they write back.",
+            f"The number on referral {rid} has not written in for over a "
+            "day, so WhatsApp will not let us message it right now. Your "
+            "message is saved and goes out the moment they write back.",
         )
 
 
@@ -725,13 +725,13 @@ async def _looks_like_bare_reply(sender: str, text: str) -> bool:
     if len(command) > 200:
         await send_text(
             sender,
-            f"To answer the family of {patient}, start your message with "
-            f"REPLY {rid} and send it again.",
+            f"To answer on referral {rid} for {patient}, start your "
+            f"message with REPLY {rid} and send it again.",
         )
         return True
     await send_buttons(
         sender,
-        f"Send this to the family of {patient}?\n\n{message}",
+        f"Send this on referral {rid} for {patient}?\n\n{message}",
         [(command, "Send to family"), ("CANCEL", "No")],
     )
     return True
