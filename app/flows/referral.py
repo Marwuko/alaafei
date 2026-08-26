@@ -517,8 +517,12 @@ async def _serve_facility(sender: str, text: str) -> None:
     )
     await send_list(
         sender,
-        f"{len(recent)} people were referred here and have not been "
-        "confirmed. Open the list and pick one when they reach you.",
+        (
+            f"{len(recent)} person was referred here and has not been confirmed. "
+            if len(recent) == 1
+            else f"{len(recent)} people were referred here and have not been confirmed. "
+        )
+        + "Open the list and pick one when they reach you.",
         "Confirm arrival",
         listrows,
         header=fname,
@@ -581,6 +585,6 @@ async def _no_arrivals(sender: str) -> None:
         )
     await send_text(
         sender,
-        f"Thank you. {len(pending)} nurses have been told nobody has "
-        "reached you yet.",
+        f"Thank you. The nurses who sent these {len(pending)} people "
+        "have been told nobody has reached you yet.",
     )
