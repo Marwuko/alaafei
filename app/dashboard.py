@@ -355,7 +355,7 @@ async function openThread(id){
         const who=out?"Health worker":d.patient;
         const when=new Date(m.at.replace(" ","T")).toLocaleString();
         return '<div class="'+cls+'"><b>'+who+'</b><br>'+
-          m.body.replace(/</g,"&lt;")+
+          m.body.replace(/^[^:]{1,40}[(]health worker[)]: */,"").replace(/</g,"&lt;")+
           '<span class="when">'+when+
           (m.delivered?"":" · waiting to send")+'</span></div>';
       }).join("");
