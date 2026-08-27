@@ -27,7 +27,9 @@ Return ONLY a JSON object, no prose, no markdown fences:
   to go, any new or worsening symptom, or any question you cannot answer
   without medical knowledge. False for thanks, greetings, "ok", and
   simple confirmations they are on the way.
-- summary: one short line for the nurse, naming the real issue
+- summary: one short line for the nurse, naming the real issue. Never say
+  "the family" or assume who is writing: it may be the patient herself.
+  Write "cannot afford transport", not "family reports no money".
   ("cannot afford transport fare", "reports bleeding has increased").
   Empty string when notify is false.
 - urgent: true only if the message suggests a danger sign or a life
