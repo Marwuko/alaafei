@@ -36,7 +36,7 @@ Return ONLY a JSON object, no prose, no markdown fences:
 - suggestions: up to 2 replies the NURSE could send back to this person,
   written in her voice, for her to tap instead of typing. Only when
   notify is true; otherwise an empty list.
-  label: under 18 characters, plain, what tapping it does
+  label: 16 characters MAXIMUM, hard limit, plain, what tapping it does
   ("Come in today", "Ask what they can pay").
   text: the full sentence the person receives, under 25 words, warm and
   clear.
@@ -92,5 +92,8 @@ def _clean_suggestions(raw) -> list[dict]:
         text = str(item.get("text") or "").strip()
         if not label or not text:
             continue
-        out.append({"label": label[:20], "text": " ".join(text.split())[:160]})
+        if len(label) > 20:
+            # Truncating mid-word gives a nurse "Offer to arrange tra"
+            label = label[:20].rsplit(" ", 1)[0]
+        out.append({"label": label, "text": " ".join(text.split())[:160]})
     return out
