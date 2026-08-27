@@ -15,6 +15,8 @@ from fastapi import Depends, APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 
+from sqlalchemy import text as sql
+
 from app.auth import require_user
 from app.db import SessionLocal
 from app.models import Facility, Household, Nurse, Referral, ReferralStatus
@@ -102,6 +104,45 @@ async def dashboard_data():
     return JSONResponse({"stats": stats.__dict__, "rows": rows})
 
 
+@router.get("/dashboard/referral/{rid}", dependencies=[Depends(require_user)])
+async def referral_thread(rid: int):
+    """Every message that passed through Alaafei about one referral. This is
+    what makes the audit trail real rather than claimed."""
+    async with SessionLocal() as session:
+        head = (
+            await session.execute(
+                sql(
+                    "SELECT r.id, r.patient_name, r.danger_sign, r.status, "
+                    "h.caregiver_name, h.community "
+                    "FROM referrals r JOIN households h ON h.id = r.household_id "
+                    "WHERE r.id = :r"
+                ),
+                {"r": rid},
+            )
+        ).first()
+        msgs = (
+            await session.execute(
+                sql(
+                    "SELECT direction, body, created_at, delivered "
+                    "FROM referral_messages WHERE referral_id = :r "
+                    "ORDER BY id ASC"
+                ),
+                {"r": rid},
+            )
+        ).fetchall()
+    if head is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({
+        "id": head[0], "patient": head[1], "danger_sign": head[2],
+        "status": str(head[3]), "contact": head[4], "community": head[5],
+        "messages": [
+            {"direction": m[0], "body": m[1],
+             "at": str(m[2]), "delivered": bool(m[3])}
+            for m in msgs
+        ],
+    })
+
+
 PAGE = """<!doctype html>
 <html lang="en">
 <head>
@@ -176,6 +217,25 @@ main{max-width:1000px;margin:0 auto;padding:0 2rem}
 .waited{flex:0 0 auto;font-size:.75rem;color:var(--khaki);
   font-variant-numeric:tabular-nums;text-align:right;min-width:5.5rem}
 .card.urgent .waited{color:var(--harmattan);font-weight:650}
+.card{cursor:pointer}
+.card:hover{border-color:var(--leaf)}
+#veil{position:fixed;inset:0;background:rgba(22,33,28,.45);display:none;
+  align-items:flex-end;justify-content:center;z-index:20}
+#veil.on{display:flex}
+#panel{background:var(--paper);width:100%;max-width:640px;max-height:82vh;
+  overflow:auto;border-radius:14px 14px 0 0;padding:1.4rem 1.5rem 2rem}
+#panel h2{font-size:1.05rem;margin-bottom:.15rem}
+#panel .meta{color:var(--khaki);font-size:.83rem;margin-bottom:1.1rem}
+#panel .close{float:right;cursor:pointer;color:var(--khaki);font-size:1.3rem;
+  line-height:1;padding:0 .3rem}
+.msg{margin-bottom:.7rem;max-width:82%;padding:.6rem .8rem;border-radius:10px;
+  font-size:.9rem}
+.msg .when{display:block;font-size:.7rem;color:var(--khaki);margin-top:.3rem;
+  font-variant-numeric:tabular-nums}
+.msg.in{background:var(--card);border:1px solid var(--sand)}
+.msg.out{background:var(--leaf-soft);margin-left:auto}
+.msg.held{opacity:.65;border-style:dashed}
+.nothing{color:var(--khaki);font-size:.88rem}
 .empty{padding:3rem 0;color:var(--khaki)}
 @media (max-width:640px){main,header{padding-left:1rem;padding-right:1rem}
   .hero-copy h2{font-size:1.2rem}.where{display:none}}
@@ -261,7 +321,8 @@ async function refresh(){
       const fresh = seen[r.id] && seen[r.id]!==r.status;
       const cls="card"+(r.status==="escalated"?" urgent":"")+(fresh?" new":"");
       seen[r.id]=r.status;
-      return '<div class="'+cls+'"><div class="id">#'+r.id+'</div>'+
+      return '<div class="'+cls+'" onclick="openThread('+r.id+')">'+
+        '<div class="id">#'+r.id+'</div>'+
         '<div class="who"><b>'+r.patient+'</b><div>'+r.danger_sign+'</div></div>'+
         '<div class="where">'+r.community+' → '+r.facility+'</div>'+
         track(r.status)+'<div class="waited">'+hrs(r.registered_iso)+'</div></div>';
@@ -273,9 +334,47 @@ async function refresh(){
     document.getElementById("stamp").textContent="connection lost, retrying";
   }
 }
+async function openThread(id){
+  const veil=document.getElementById("veil");
+  const panel=document.getElementById("panel");
+  panel.innerHTML='<div class="nothing">Loading...</div>';
+  veil.classList.add("on");
+  try{
+    const res=await fetch("/dashboard/referral/"+id);
+    const d=await res.json();
+    let html='<span class="close" onclick="closeThread()">&times;</span>'+
+      '<h2>'+d.patient+' · referral #'+d.id+'</h2>'+
+      '<div class="meta">'+d.danger_sign+' · '+d.community+
+      ' · contact: '+d.contact+'</div>';
+    if(!d.messages.length){
+      html+='<div class="nothing">No messages yet on this referral.</div>';
+    }else{
+      html+=d.messages.map(m=>{
+        const out=m.direction==="to_family";
+        const cls="msg "+(out?"out":"in")+(m.delivered?"":" held");
+        const who=out?"Health worker":d.patient;
+        const when=new Date(m.at.replace(" ","T")).toLocaleString();
+        return '<div class="'+cls+'"><b>'+who+'</b><br>'+
+          m.body.replace(/</g,"&lt;")+
+          '<span class="when">'+when+
+          (m.delivered?"":" · waiting to send")+'</span></div>';
+      }).join("");
+    }
+    panel.innerHTML=html;
+  }catch(e){
+    panel.innerHTML='<span class="close" onclick="closeThread()">&times;</span>'+
+      '<div class="nothing">Could not load that conversation.</div>';
+  }
+}
+function closeThread(){document.getElementById("veil").classList.remove("on");}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeThread();});
+
 refresh();
 setInterval(refresh,5000);
 </script>
+<div id="veil" onclick="if(event.target===this)closeThread()">
+  <div id="panel"></div>
+</div>
 </body>
 </html>"""
 
