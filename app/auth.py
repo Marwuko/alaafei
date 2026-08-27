@@ -79,6 +79,17 @@ async def current_user(request: Request) -> str | None:
     return _unsign(token) if token else None
 
 
+async def user_zone(username: str) -> str | None:
+    """None means district-wide. A value scopes them to one CHPS zone."""
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                sql("SELECT zone FROM users WHERE username = :u"), {"u": username}
+            )
+        ).first()
+    return (row[0] or None) if row else None
+
+
 async def require_user(request: Request) -> str:
     """Redirect a person to the login page. Answer a script with a 401."""
     user = await current_user(request)

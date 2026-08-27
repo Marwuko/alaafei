@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models import Household, Referral, ReferralStatus, utcnow
+from app.models import Household, Referral, ReferralStatus, utcnow, Nurse
 
 HIGH_RISK_SIGNS = (
     "bleed",
@@ -43,13 +43,21 @@ class PriorityItem:
         self.reasons.append(reason)
 
 
-async def compute_priorities(session, limit: int = 5) -> list[PriorityItem]:
+async def compute_priorities(
+    session, limit: int = 5, zone: str | None = None
+) -> list[PriorityItem]:
     """Rank open referrals for a nurse's morning visit list."""
     now = utcnow()
     open_referrals = (
         (
             await session.execute(
-                select(Referral).where(
+                (
+                    select(Referral)
+                    .join(Nurse, Nurse.id == Referral.nurse_id)
+                    .where(Nurse.chps_zone == zone)
+                    if zone
+                    else select(Referral)
+                ).where(
                     Referral.status.in_(
                         [
                             ReferralStatus.REGISTERED,

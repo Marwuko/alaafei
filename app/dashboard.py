@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from sqlalchemy import text as sql
 
-from app.auth import require_user
+from app.auth import require_user, user_zone
 from app.db import SessionLocal
 from app.models import Facility, Household, Nurse, Referral, ReferralStatus
 
@@ -38,12 +38,15 @@ class Stats:
     median_hours: float | None
 
 
-async def compute_stats(session) -> tuple[Stats, list[dict]]:
-    referrals = (
-        (await session.execute(select(Referral).order_by(Referral.created_at.desc())))
-        .scalars()
-        .all()
-    )
+async def compute_stats(session, zone: str | None = None) -> tuple[Stats, list[dict]]:
+    stmt = select(Referral).order_by(Referral.created_at.desc())
+    if zone:
+        # A nurse in one zone has no business reading patient names from
+        # another. Scope by the zone of the nurse who made the referral.
+        stmt = stmt.join(Nurse, Nurse.id == Referral.nurse_id).where(
+            Nurse.chps_zone == zone
+        )
+    referrals = (await session.execute(stmt)).scalars().all()
     arrived = [r for r in referrals if r.status in (ReferralStatus.ARRIVED, ReferralStatus.CLOSED)]
     escalated = [r for r in referrals if r.status == ReferralStatus.ESCALATED]
     open_refs = [
@@ -98,14 +101,15 @@ async def compute_stats(session) -> tuple[Stats, list[dict]]:
 
 
 @router.get("/dashboard/data", dependencies=[Depends(require_user)])
-async def dashboard_data():
+async def dashboard_data(user: str = Depends(require_user)):
+    zone = await user_zone(user)
     async with SessionLocal() as session:
-        stats, rows = await compute_stats(session)
+        stats, rows = await compute_stats(session, zone)
     return JSONResponse({"stats": stats.__dict__, "rows": rows})
 
 
 @router.get("/dashboard/referral/{rid}", dependencies=[Depends(require_user)])
-async def referral_thread(rid: int):
+async def referral_thread(rid: int, user: str = Depends(require_user)):
     """Every message that passed through Alaafei about one referral. This is
     what makes the audit trail real rather than claimed."""
     async with SessionLocal() as session:
@@ -132,6 +136,20 @@ async def referral_thread(rid: int):
         ).fetchall()
     if head is None:
         return JSONResponse({"error": "not found"}, status_code=404)
+    zone = await user_zone(user)
+    if zone:
+        async with SessionLocal() as session:
+            owner = (
+                await session.execute(
+                    sql(
+                        "SELECT n.chps_zone FROM referrals r "
+                        "JOIN nurses n ON n.id = r.nurse_id WHERE r.id = :r"
+                    ),
+                    {"r": rid},
+                )
+            ).first()
+        if owner is None or owner[0] != zone:
+            return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse({
         "id": head[0], "patient": head[1], "danger_sign": head[2],
         "status": str(head[3]), "contact": head[4], "community": head[5],

@@ -311,7 +311,7 @@ async def _send_priority_list(sender: str) -> None:
         if nurse is None:
             await send_text(sender, "This number is not registered as a nurse yet.")
             return
-        items = await compute_priorities(session)
+        items = await compute_priorities(session, zone=nurse.chps_zone)
     await send_text(sender, format_priority_message(items))
 
 
