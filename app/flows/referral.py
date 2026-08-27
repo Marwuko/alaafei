@@ -445,18 +445,9 @@ async def _relay_to_facility(
 ) -> None:
     """Pass a caregiver's message to the facility and the referring nurse."""
     async with SessionLocal() as session:
-        household = (
-            await session.execute(
-                select(Household).where(Household.caregiver_number == sender)
-            )
-        ).scalars().first()
-        referral = (
-            await session.execute(
-                select(Referral)
-                .where(Referral.household_id == household.id)
-                .order_by(Referral.id.desc())
-            )
-        ).scalars().first()
+        row = await _latest_referral_for(session, sender)
+        referral = row[0] if row else None
+        household = row[1] if row else None
         if referral is None:
             await send_text(sender, "Thank you. Your nurse will be in touch.")
             return
@@ -724,23 +715,10 @@ async def _thread_is_live(sender: str) -> bool:
     """True when a nurse has already written to this family about their
     referral. Silence after she asks a question is the worst outcome."""
     async with SessionLocal() as session:
-        household = (
-            await session.execute(
-                select(Household).where(Household.caregiver_number == sender)
-            )
-        ).scalars().first()
-        if household is None:
+        row = await _latest_referral_for(session, sender)
+        if row is None:
             return False
-        referral = (
-            await session.execute(
-                select(Referral)
-                .where(Referral.household_id == household.id)
-                .order_by(Referral.id.desc())
-            )
-        ).scalars().first()
-        if referral is None:
-            return False
-        rid = referral.id
+        rid = row[0].id
     return await thread.nurse_has_spoken(rid)
 
 
@@ -799,3 +777,31 @@ async def _open_message(sender: str) -> None:
         f"Referral {rid} for {patient}. Type REPLY {rid} and your message to "
         "answer, and it will reach them from this number.",
     )
+
+
+async def _latest_referral_for(session, sender: str):
+    """Which referral is this number talking about?
+
+    One number can sit on several households and several referrals over time.
+    Answering with the oldest one means a message about today gets filed
+    against something from last week. Prefer the newest referral that is still
+    open; fall back to the newest of any kind so a reply after discharge still
+    lands somewhere sensible.
+    """
+    base = (
+        select(Referral, Household)
+        .join(Household, Household.id == Referral.household_id)
+        .where(Household.caregiver_number == sender)
+    )
+    still_open = (
+        await session.execute(
+            base.where(
+                Referral.status.notin_(
+                    [ReferralStatus.ARRIVED, ReferralStatus.CLOSED]
+                )
+            ).order_by(Referral.id.desc())
+        )
+    ).first()
+    if still_open is not None:
+        return still_open
+    return (await session.execute(base.order_by(Referral.id.desc()))).first()
