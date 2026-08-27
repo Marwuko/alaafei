@@ -333,21 +333,44 @@ async def escalate_overdue() -> None:
             .scalars()
             .all()
         )
+        # One message per nurse, not one per referral. A sweep that finds six
+        # overdue referrals used to send six alerts and twelve voice notes,
+        # which is how a useful signal turns into something people mute.
+        by_nurse: dict[str, list[str]] = {}
+        nudge: set[str] = set()
         for referral in overdue:
             referral.status = ReferralStatus.ESCALATED
             referral.escalated_at = utcnow()
             nurse = await session.get(Nurse, referral.nurse_id)
             household = await session.get(Household, referral.household_id)
-            await session.commit()
-            await send_text(
-                nurse.wa_number,
-                f"ALERT: referral {referral.id} for {referral.patient_name} with "
-                f"{referral.danger_sign} has not been confirmed at the facility "
-                f"after {settings.escalation_hours}h. Please follow up with "
-                f"{household.caregiver_name} in {household.community}.",
+            if nurse is None or household is None:
+                continue
+            by_nurse.setdefault(nurse.wa_number, []).append(
+                f"{referral.id}. {referral.patient_name}, {referral.danger_sign} "
+                f"({household.caregiver_name}, {household.community})"
             )
             if household.caregiver_number:
-                await send_voice_note_bilingual(household.caregiver_number, clip="gentle_nudge")
+                nudge.add(household.caregiver_number)
+        await session.commit()
+
+    hours = settings.escalation_hours
+    for wa_number, lines in by_nurse.items():
+        if len(lines) == 1:
+            body = (
+                f"Not confirmed at the facility after {hours}h:\n\n{lines[0]}\n\n"
+                "Please follow up."
+            )
+        else:
+            body = (
+                f"{len(lines)} referrals not confirmed at the facility after "
+                f"{hours}h:\n\n" + "\n".join(lines) + "\n\nPlease follow up."
+            )
+        await send_text(wa_number, body)
+        print(f"[sweep] {len(lines)} overdue to {wa_number}", flush=True)
+
+    # One nudge per number, however many referrals that number is behind on.
+    for caregiver_number in nudge:
+        await send_voice_note_bilingual(caregiver_number, clip="gentle_nudge")
 
 
 def _parse_id(payload: str) -> int | None:
@@ -414,10 +437,12 @@ async def _serve_caregiver(sender: str, text: str) -> None:
             # An ordinary reply in a conversation the nurse started. She needs
             # her answer, so pass the family's own words straight through.
             note = text
-        await _relay_to_facility(sender, note)
+        await _relay_to_facility(sender, note, plan.get("suggestions"))
 
 
-async def _relay_to_facility(sender: str, text: str) -> None:
+async def _relay_to_facility(
+    sender: str, text: str, suggestions: list[dict] | None = None
+) -> None:
     """Pass a caregiver's message to the facility and the referring nurse."""
     async with SessionLocal() as session:
         household = (
@@ -460,7 +485,23 @@ async def _relay_to_facility(sender: str, text: str) -> None:
         await send_facility_template(facility_number, patient, summary, rid)
         print(f"[relay] facility window shut, template sent for #{rid}", flush=True)
     if await window_open(nurse_number):
-        await send_text(nurse_number, note)
+        # A nurse mid-shift should not have to type. Offer the drafted
+        # replies as buttons, showing the exact words so she is not
+        # tapping blind. The button id is the REPLY command itself.
+        taps = []
+        for s_ in suggestions or []:
+            command = f"REPLY {rid} {s_['text']}"
+            if len(command) <= 200:
+                taps.append((command, s_["label"]))
+        if taps:
+            drafted = "\n\n".join(f'"{c.split(" ", 2)[2]}"' for c, _ in taps)
+            await send_buttons(
+                nurse_number,
+                f"{note}\n\nTap to send one of these:\n\n{drafted}",
+                taps[:3],
+            )
+        else:
+            await send_text(nurse_number, note)
     else:
         await send_nurse_template(nurse_number, patient, rid, summary)
         print(f"[relay] nurse window shut, template sent for #{rid}", flush=True)

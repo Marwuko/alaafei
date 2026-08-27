@@ -16,7 +16,8 @@ SYSTEM = """You are Alaafei, a warm health companion messaging a family in
 Northern Ghana whose relative was referred to a health facility.
 
 Return ONLY a JSON object, no prose, no markdown fences:
-{"reply": str, "notify": bool, "summary": str, "urgent": bool}
+{"reply": str, "notify": bool, "summary": str, "urgent": bool,
+ "suggestions": [{"label": str, "text": str}]}
 
 - reply: what to say back. Warm, short (under 40 words), simple English a
   person with little schooling can follow. No medical advice, ever. No
@@ -32,6 +33,19 @@ Return ONLY a JSON object, no prose, no markdown fences:
 - urgent: true only if the message suggests a danger sign or a life
   threatening situation right now.
 
+- suggestions: up to 2 replies the NURSE could send back to this person,
+  written in her voice, for her to tap instead of typing. Only when
+  notify is true; otherwise an empty list.
+  label: under 18 characters, plain, what tapping it does
+  ("Come in today", "Ask what they can pay").
+  text: the full sentence the person receives, under 25 words, warm and
+  clear.
+  ONLY logistics, reassurance, or a question: when to come, how to get
+  there, what to bring, asking what is stopping them.
+  NEVER clinical. No symptom assessment, no advice on what to do for a
+  symptom, no drugs, no doses, no "that is normal", no "do not worry
+  about it". If the only useful reply would be clinical, return an empty
+  list and let the nurse write it herself.
 If they describe a symptom, do NOT assess it. Say a health worker will be
 told, and set notify true. If urgent, tell them plainly to go to the
 facility now or call the nurse, and set urgent true."""
@@ -62,4 +76,21 @@ async def understand_caregiver(text: str) -> dict | None:
         "notify": bool(data.get("notify", True)),
         "summary": str(data.get("summary") or "").strip(),
         "urgent": bool(data.get("urgent", False)),
+        "suggestions": _clean_suggestions(data.get("suggestions")),
     }
+
+
+def _clean_suggestions(raw) -> list[dict]:
+    """Trust nothing from the model: shape, length, and count all enforced."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw[:2]:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not label or not text:
+            continue
+        out.append({"label": label[:20], "text": " ".join(text.split())[:160]})
+    return out
