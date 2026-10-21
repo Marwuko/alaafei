@@ -240,6 +240,13 @@ async def _register_referral(sender: str, payload: str) -> None:
         await send_referral_template(caregiver_number, patient, facility_name)
         _AWAITING_VOICE.add(caregiver_number)
     else:
+        await send_text(
+            target,
+            f"No number on referral #{rid}, so the two voice messages for "
+            f"{patient} come to you: a welcome, then how to reach "
+            f"{facility_name}. Dagbani first, then English. Play them to the "
+            "household when you visit.",
+        )
         await send_voice_note_bilingual(target, clip="welcome")
         await send_voice_note_bilingual(target, clip="transport_reminder")
     ok = await send_buttons(
@@ -285,11 +292,18 @@ async def _confirm_arrival(sender: str, payload: str) -> None:
         await session.commit()
         nurse_number = (await session.get(Nurse, referral.nurse_id)).wa_number
         household = await session.get(Household, referral.household_id)
+        facility_name = facility.name
 
     await send_text(sender, f"Referral #{rid} confirmed. Thank you.")
     await send_text(nurse_number, f"Good news: referral #{rid} ({referral.patient_name}) has arrived.")
     if household.caregiver_number:
-        await send_voice_note_bilingual(household.caregiver_number, clip="arrival_thanks")
+        await _voice_with_context(
+            household.caregiver_number,
+            f"{referral.patient_name} has been confirmed at {facility_name} "
+            f"(referral #{rid}). This message says thank you for coming. "
+            "Dagbani first, then English.",
+            "arrival_thanks",
+        )
 
 
 async def _close_referral(sender: str, payload: str) -> None:
@@ -343,12 +357,14 @@ async def escalate_overdue() -> None:
         # overdue referrals used to send six alerts and twelve voice notes,
         # which is how a useful signal turns into something people mute.
         by_nurse: dict[str, list[str]] = {}
-        nudge: set[str] = set()
+        # caregiver number -> [(patient, facility name)] it is behind on
+        nudge: dict[str, list[tuple[str, str]]] = {}
         for referral in overdue:
             referral.status = ReferralStatus.ESCALATED
             referral.escalated_at = utcnow()
             nurse = await session.get(Nurse, referral.nurse_id)
             household = await session.get(Household, referral.household_id)
+            facility = await session.get(Facility, referral.facility_id)
             if nurse is None or household is None:
                 continue
             by_nurse.setdefault(nurse.wa_number, []).append(
@@ -356,7 +372,10 @@ async def escalate_overdue() -> None:
                 f"({household.caregiver_name}, {household.community})"
             )
             if household.caregiver_number:
-                nudge.add(household.caregiver_number)
+                nudge.setdefault(household.caregiver_number, []).append(
+                    (referral.patient_name,
+                     facility.name if facility else "the health facility")
+                )
         await session.commit()
 
     hours = settings.escalation_hours
@@ -375,8 +394,18 @@ async def escalate_overdue() -> None:
         print(f"[sweep] {len(lines)} overdue to {wa_number}", flush=True)
 
     # One nudge per number, however many referrals that number is behind on.
-    for caregiver_number in nudge:
-        await send_voice_note_bilingual(caregiver_number, clip="gentle_nudge")
+    for caregiver_number, cases in nudge.items():
+        names = ", ".join(p for p, _ in cases[:-1])
+        names = f"{names} and {cases[-1][0]}" if names else cases[-1][0]
+        places = {f for _, f in cases}
+        where = places.pop() if len(places) == 1 else "the health facility"
+        verb = "has" if len(cases) == 1 else "have"
+        await _voice_with_context(
+            caregiver_number,
+            f"{names} {verb} not yet been confirmed at {where}. This message "
+            "asks you to go. Dagbani first, then English.",
+            "gentle_nudge",
+        )
 
 
 def _parse_id(payload: str) -> int | None:
@@ -406,6 +435,13 @@ async def _serve_caregiver(sender: str, text: str) -> None:
     """First message opens the 24h window and earns the voice notes.
     Anything after that is a question -- relay it to the facility and nurse."""
     if text.strip().upper() == "CARE_AGAIN":
+        ctx = await _referral_context(sender)
+        where = f"how to reach {ctx[2]}" if ctx else "how to get there"
+        await send_text(
+            sender,
+            f"Playing again: the welcome, then {where}. Dagbani first, "
+            "then English.",
+        )
         await send_voice_note_bilingual(sender, clip="welcome")
         await send_voice_note_bilingual(sender, clip="transport_reminder")
         return
@@ -414,11 +450,20 @@ async def _serve_caregiver(sender: str, text: str) -> None:
         return
     if sender in _AWAITING_VOICE:
         _AWAITING_VOICE.discard(sender)
-        await send_text(
-            sender,
-            "Thank you. Here is a message from your nurse - it plays in "
-            "Dagbani, then English.",
-        )
+        ctx = await _referral_context(sender)
+        if ctx:
+            rid, patient, facility_name = ctx
+            caption = (
+                f"Thank you. {patient} has been referred to {facility_name} "
+                f"(referral #{rid}). Two voice messages from the nurse follow: "
+                "a welcome, then how to get there. Dagbani first, then English."
+            )
+        else:
+            caption = (
+                "Thank you. Two voice messages from your nurse follow: a "
+                "welcome, then how to get there. Dagbani first, then English."
+            )
+        await send_text(sender, caption)
         await send_voice_note_bilingual(sender, clip="welcome")
         await send_voice_note_bilingual(sender, clip="transport_reminder")
         await send_buttons(
@@ -444,6 +489,35 @@ async def _serve_caregiver(sender: str, text: str) -> None:
             # her answer, so pass the family's own words straight through.
             note = text
         await _relay_to_facility(sender, note, plan.get("suggestions"))
+
+
+async def _referral_context(sender: str) -> tuple[int, str, str] | None:
+    """(referral id, patient, facility name) for the referral this household
+    number is currently about, or None if it is on none."""
+    async with SessionLocal() as session:
+        row = await _latest_referral_for(session, sender)
+        if row is None:
+            return None
+        referral = row[0]
+        facility = await session.get(Facility, referral.facility_id)
+        return (
+            referral.id,
+            referral.patient_name,
+            facility.name if facility else "the health facility",
+        )
+
+
+async def _voice_with_context(to: str, caption: str, clip: str) -> None:
+    """A bare voice note says nothing about which referral it belongs to or
+    why it came, so one line of text always goes first. Both the text and
+    the audio are free-form sends, which Meta drops outside the 24h window
+    without saying so at send time; check first rather than fire two
+    doomed messages."""
+    if not await window_open(to):
+        print(f"[voice] window shut for {to}, {clip} not sent", flush=True)
+        return
+    await send_text(to, caption)
+    await send_voice_note_bilingual(to, clip=clip)
 
 
 async def _relay_to_facility(
@@ -516,8 +590,12 @@ async def _send_advice(sender: str, payload: str, clip: str, label: str) -> None
     she can play it to a household that has no phone."""
     target = _normalise(payload)
     if not target:
+        await send_text(
+            sender,
+            f"Here is the {label} to play for the household. Dagbani first, "
+            "then English.",
+        )
         await send_voice_note_bilingual(sender, clip=clip)
-        await send_text(sender, f"Sent you the {label} to play for the family.")
         return
     await send_text(
         target,
