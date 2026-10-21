@@ -19,6 +19,7 @@ from app import thread
 from app.wa_window import last_template_referral, window_open
 from app.models import (
     Facility,
+    FacilityZone,
     Household,
     MessageLog,
     Nurse,
@@ -204,7 +205,14 @@ async def _register_referral(sender: str, payload: str) -> None:
             await send_text(sender, "This number is not registered as a nurse yet.")
             return
 
-        facility = (await session.execute(select(Facility))).scalars().first()
+        facility = await _facility_for(session, nurse)
+        if facility is None:
+            await send_text(
+                sender,
+                "No receiving facility is set up yet, so this referral was not "
+                "registered. Tell the district team.",
+            )
+            return
         household = Household(
             caregiver_name=f"Caregiver of {patient}",
             caregiver_number=caregiver_number,
@@ -264,6 +272,25 @@ async def _register_referral(sender: str, payload: str) -> None:
         ref.status = ReferralStatus.CAREGIVER_NOTIFIED
         ref.notified_at = utcnow()
         await session.commit()
+
+
+async def _facility_for(session, nurse: Nurse) -> Facility | None:
+    """The facility a nurse's zone refers to. With one facility in the
+    district this never mattered; with two, picking the first row sent
+    every zone's patients to the same desk. Unmapped zones keep the old
+    answer, the lowest-id facility, and say so in the log."""
+    mapped = await session.get(FacilityZone, nurse.chps_zone)
+    if mapped is not None:
+        facility = await session.get(Facility, mapped.facility_id)
+        if facility is not None:
+            return facility
+    facility = (
+        await session.execute(select(Facility).order_by(Facility.id.asc()))
+    ).scalars().first()
+    if facility is not None:
+        print(f"[route] no facility mapped for zone {nurse.chps_zone!r}, "
+              f"using {facility.name}", flush=True)
+    return facility
 
 
 async def _confirm_arrival(sender: str, payload: str) -> None:

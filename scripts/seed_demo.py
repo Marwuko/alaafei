@@ -2,7 +2,7 @@
 import asyncio
 
 from app.db import SessionLocal, engine
-from app.models import Base, Facility, Nurse
+from app.models import Base, Facility, FacilityZone, Nurse
 
 
 async def main() -> None:
@@ -15,8 +15,10 @@ async def main() -> None:
                 Facility(name="Savelugu Health Centre", wa_number="DEMO_FACILITY_NUMBER", district="Savelugu"),
             ]
         )
+        await session.flush()
+        session.add(FacilityZone(chps_zone="Kpalsogu CHPS", facility_id=1))
         await session.commit()
-    print("Seeded: 1 nurse, 1 facility. Replace DEMO_* numbers with the real demo phones.")
+    print("Seeded: 1 nurse, 1 facility, Kpalsogu CHPS -> facility 1. Replace DEMO_* numbers with the real demo phones.")
 
 
 if __name__ == "__main__":

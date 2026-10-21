@@ -47,6 +47,16 @@ class Facility(Base):
     district: Mapped[str] = mapped_column(String(120))
 
 
+class FacilityZone(Base):
+    """Which facility a CHPS zone refers to. A zone has one receiving
+    facility; a facility serves many zones. Zones with no row fall back to
+    the lowest-id facility, which is what every referral did before."""
+    __tablename__ = "facility_zones"
+
+    chps_zone: Mapped[str] = mapped_column(String(120), primary_key=True)
+    facility_id: Mapped[int] = mapped_column(ForeignKey("facilities.id"))
+
+
 class Household(Base):
     __tablename__ = "households"
 
