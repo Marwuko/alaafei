@@ -10,7 +10,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 
-from app.db import SessionLocal, engine
+from app.db import SessionLocal, engine, ensure_raw_tables
 from app.flows import referral as flow
 from app.models import Base, Facility, Nurse, Referral, ReferralStatus, utcnow
 
@@ -24,6 +24,7 @@ async def _setup_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    await ensure_raw_tables()
     async with SessionLocal() as s:
         s.add_all(
             [

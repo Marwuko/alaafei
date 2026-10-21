@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
-from app.db import engine
+from app.db import engine, ensure_raw_tables
 from app.flows.referral import escalate_overdue
 from app.models import Base
 from app.auth import router as auth_router
@@ -15,6 +15,7 @@ from app.webhooks import router as webhook_router
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await ensure_raw_tables()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(escalate_overdue, "interval", minutes=15)
     scheduler.start()
