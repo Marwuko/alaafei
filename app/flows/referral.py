@@ -65,6 +65,14 @@ async def handle_inbound_text(sender: str, body: str) -> None:
     text = body.strip()
     upper = text.upper()
 
+    # A household number is in a conversation, not at a command line. "ok",
+    # "yes", "no", or a sentence that happens to open with "Transport" or
+    # "Child" must reach the nurse as what was said, not trip the nurse's
+    # YES-to-register or voice-guidance commands. Facilities keep ARRIVED.
+    if await _is_caregiver(sender) and not await _is_facility(sender):
+        await _serve_caregiver(sender, text)
+        return
+
     if upper.startswith("REFER "):
         await _register_referral(sender, text[6:])
     elif upper.startswith("REPLY "):
@@ -117,8 +125,6 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _no_arrivals(sender)
     elif await _is_facility(sender):
         await _serve_facility(sender, text)
-    elif await _is_caregiver(sender):
-        await _serve_caregiver(sender, text)
     elif await _looks_like_bare_reply(sender, text):
         return
     else:
