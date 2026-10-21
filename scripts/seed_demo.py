@@ -1,5 +1,11 @@
 """Seed clearly-synthetic demo data for the bootcamp demo."""
 import asyncio
+import sys
+from pathlib import Path
+
+# Run by path (python scripts/x.py) the repo root is not importable; add it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 
 from app.db import SessionLocal, engine
 from app.models import Base, Facility, FacilityZone, Nurse

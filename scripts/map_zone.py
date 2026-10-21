@@ -7,6 +7,11 @@ Referrals from nurses in an unmapped zone go to the lowest-id facility.
 """
 import asyncio
 import sys
+from pathlib import Path
+
+# Run by path (python scripts/x.py) the repo root is not importable; add it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 
 from sqlalchemy import select
 
