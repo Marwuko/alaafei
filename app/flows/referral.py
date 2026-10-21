@@ -124,10 +124,10 @@ async def handle_inbound_text(sender: str, body: str) -> None:
         await _quick_reply(sender)
     elif upper == "NO_ARRIVALS":
         await _no_arrivals(sender)
-    elif await _is_facility(sender):
-        await _serve_facility(sender, text)
     elif await _looks_like_bare_reply(sender, text):
         return
+    elif await _is_facility(sender):
+        await _serve_facility(sender, text)
     else:
         parsed = await parse_referral(text)
         if parsed is None:
@@ -612,6 +612,10 @@ async def _serve_caregiver(sender: str, text: str) -> None:
             [("CARE_AGAIN", "Play again"),
              ("CARE_HELP", "I need help")],
         )
+        # If the nurse or the desk already wrote to them, this first message
+        # is their answer, not just the tap that opens the window.
+        if await _thread_is_live(sender):
+            await _relay_to_facility(sender, text)
         return
     plan = await understand_caregiver(text)
     if plan is None:
@@ -897,7 +901,10 @@ async def _quick_reply(sender: str) -> None:
 
 async def _reply_to_family(sender: str, payload: str) -> None:
     """REPLY 7 come to the clinic this morning -- keeps the nurse and the
-    family in one thread and writes the exchange down."""
+    family in one thread and writes the exchange down. The receiving
+    facility may answer on its own referrals as well: it is told the
+    household's message and the REPLY command, so the command has to work
+    for it. The nurse hears what the desk said, so her thread stays whole."""
     parts = payload.strip().split(maxsplit=1)
     rid = _parse_id(parts[0]) if parts else None
     if rid is None or len(parts) < 2:
@@ -911,19 +918,34 @@ async def _reply_to_family(sender: str, payload: str) -> None:
             return
         nurse = await session.get(Nurse, referral.nurse_id)
         household = await session.get(Household, referral.household_id)
-        if nurse is None or nurse.wa_number != sender:
+        facility = await session.get(Facility, referral.facility_id)
+        copy_nurse: str | None = None
+        if nurse is not None and nurse.wa_number == sender:
+            signed = f"{nurse.name} (health worker)"
+        elif facility is not None and facility.wa_number == sender:
+            signed = facility.name
+            copy_nurse = nurse.wa_number if nurse else None
+        else:
+            who = facility.name if facility else "the receiving facility"
             await send_text(
-                sender, f"Referral {rid} belongs to another nurse."
+                sender,
+                f"Only the nurse who made referral {rid} or {who} can answer on it.",
             )
             return
         caregiver_number = household.caregiver_number
-        nurse_name = nurse.name
         patient = referral.patient_name
     if not caregiver_number:
         await send_text(sender, f"No contact number on file for referral {rid}.")
         return
-    body = f"{nurse_name} (health worker): {message}"
+    body = f"{signed}: {message}"
     sent = await thread.deliver_or_hold(rid, caregiver_number, sender, body)
+    if copy_nurse:
+        await _alert_nurse(
+            copy_nurse,
+            f"{signed} wrote to the number on referral {rid} ({patient}):\n\n"
+            f'"{message}"' + ("" if sent else "\n\n(Held until they write in.)"),
+            rid, patient, f"{signed} replied: {message}"[:120],
+        )
     if sent:
         await send_text(sender, f"Sent on referral {rid} for {patient}.")
     else:
@@ -960,7 +982,11 @@ async def _looks_like_bare_reply(sender: str, text: str) -> bool:
         if referral is None:
             return False
         nurse = await session.get(Nurse, referral.nurse_id)
-        if nurse is None or nurse.wa_number != sender:
+        facility = await session.get(Facility, referral.facility_id)
+        mine = (nurse is not None and nurse.wa_number == sender) or (
+            facility is not None and facility.wa_number == sender
+        )
+        if not mine:
             return False
         patient = referral.patient_name
     # Only offer this where a conversation already exists. Otherwise any
