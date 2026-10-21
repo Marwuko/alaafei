@@ -31,10 +31,25 @@ RAW_TABLES = [
 ]
 
 
+# Columns added to ORM tables after the live database was created.
+# create_all never alters an existing table, so they are added here.
+ADDED_COLUMNS = [
+    ("referrals", "reminded_at", "TIMESTAMP"),
+    ("referrals", "reminder_count", "INTEGER NOT NULL DEFAULT 0"),
+]
+
+
 async def ensure_raw_tables() -> None:
     async with engine.begin() as conn:
         for ddl in RAW_TABLES:
             await conn.execute(text(ddl))
+        for table, column, decl in ADDED_COLUMNS:
+            have = {
+                row[1]
+                for row in (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+            }
+            if column not in have:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {decl}"))
 
 
 async def get_session():

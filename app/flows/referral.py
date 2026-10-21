@@ -357,6 +357,7 @@ async def escalate_overdue() -> None:
         # overdue referrals used to send six alerts and twelve voice notes,
         # which is how a useful signal turns into something people mute.
         by_nurse: dict[str, list[str]] = {}
+        first_case: dict[str, tuple[int, str]] = {}
         # caregiver number -> [(patient, facility name)] it is behind on
         nudge: dict[str, list[tuple[str, str]]] = {}
         for referral in overdue:
@@ -367,6 +368,7 @@ async def escalate_overdue() -> None:
             facility = await session.get(Facility, referral.facility_id)
             if nurse is None or household is None:
                 continue
+            first_case.setdefault(nurse.wa_number, (referral.id, referral.patient_name))
             by_nurse.setdefault(nurse.wa_number, []).append(
                 f"{referral.id}. {referral.patient_name}, {referral.danger_sign} "
                 f"({household.caregiver_name}, {household.community})"
@@ -390,7 +392,11 @@ async def escalate_overdue() -> None:
                 f"{len(lines)} referrals not confirmed at the facility after "
                 f"{hours}h:\n\n" + "\n".join(lines) + "\n\nPlease follow up."
             )
-        await send_text(wa_number, body)
+        rid, patient = first_case[wa_number]
+        await _alert_nurse(
+            wa_number, body, rid, patient,
+            f"Not confirmed at the facility after {hours}h. Please follow up.",
+        )
         print(f"[sweep] {len(lines)} overdue to {wa_number}", flush=True)
 
     # One nudge per number, however many referrals that number is behind on.
@@ -406,6 +412,113 @@ async def escalate_overdue() -> None:
             "asks you to go. Dagbani first, then English.",
             "gentle_nudge",
         )
+
+
+# How long after the alert, then after each follow-up, the next one is due.
+# Three follow-ups and then silence: a reminder that never stops is one that
+# gets muted, and the referral stays on the dashboard until it is closed.
+FOLLOW_UP_AFTER = [timedelta(hours=24), timedelta(hours=72), timedelta(hours=72)]
+
+
+async def follow_up_escalated() -> None:
+    """Runs on the same schedule as the sweep. An escalated referral is not
+    done with: the nurse hears again, with different words each time, is
+    asked what is stopping the person, and is shown how to close it."""
+    now = utcnow()
+    async with SessionLocal() as session:
+        escalated = (
+            await session.execute(
+                select(Referral).where(
+                    Referral.status == ReferralStatus.ESCALATED,
+                    Referral.reminder_count < len(FOLLOW_UP_AFTER),
+                )
+            )
+        ).scalars().all()
+        # (nurse number, round) -> [(rid, patient, line)]. Grouped by round
+        # too, so "last reminder" is never said over a referral on its first.
+        by_nurse: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
+        for referral in escalated:
+            since = referral.reminded_at or referral.escalated_at
+            if since is None:
+                continue
+            if now - _as_utc(since) < FOLLOW_UP_AFTER[referral.reminder_count]:
+                continue
+            nurse = await session.get(Nurse, referral.nurse_id)
+            household = await session.get(Household, referral.household_id)
+            if nurse is None or household is None:
+                continue
+            referral.reminder_count += 1
+            referral.reminded_at = now
+            days = int((now - _as_utc(referral.escalated_at or now)).total_seconds() // 86400)
+            line = (
+                f"{referral.id}. {referral.patient_name}, {referral.danger_sign} "
+                f"({household.caregiver_name}, {household.community}) - "
+                f"{days} day{'' if days == 1 else 's'} since the alert"
+            )
+            by_nurse.setdefault((nurse.wa_number, referral.reminder_count), []).append(
+                (referral.id, referral.patient_name, line)
+            )
+        await session.commit()
+
+    for (wa_number, rounds), cases in by_nurse.items():
+        rid, patient, _ = cases[0]
+        listed = "\n".join(line for _, _, line in cases)
+        one = len(cases) == 1
+        if rounds >= len(FOLLOW_UP_AFTER):
+            body = (
+                f"Last reminder about {'this referral' if one else 'these referrals'}:"
+                f"\n\n{listed}\n\n"
+                "There will be no more messages about "
+                f"{'it' if one else 'them'}, but {'it stays' if one else 'they stay'} "
+                "on the dashboard until closed. Reply CLOSE and the number once "
+                "the person has been seen, or no longer needs the facility."
+            )
+            summary = "Last reminder: still not confirmed at the facility."
+        elif rounds == 2:
+            body = (
+                f"Still open:\n\n{listed}\n\n"
+                "Is something stopping them - transport, money, someone at "
+                "home? If you know, reply REPLY, the number and a message to "
+                "the number on the referral, so it is on the record. Reply "
+                "CLOSE and the number if it is resolved."
+            )
+            summary = "Still not confirmed. Is something stopping them?"
+        else:
+            body = (
+                f"Checking in on {'this referral' if one else 'these referrals'}:"
+                f"\n\n{listed}\n\n"
+                "Have you been able to reach the number? Reply CLOSE and the "
+                "number if the person was seen elsewhere or no longer needs "
+                "the facility. Reply REPLY, the number and your message to "
+                "write to them from here."
+            )
+            summary = "Checking in: still not confirmed at the facility."
+        buttons = [(f"CLOSE {rid}", "Resolved, close it"), ("PRIORITY", "My visit list")] if one else None
+        await _alert_nurse(wa_number, body, rid, patient, summary, buttons)
+        print(f"[sweep] follow-up round {rounds} for {len(cases)} to {wa_number}", flush=True)
+
+
+async def _alert_nurse(
+    wa_number: str, body: str, rid: int, patient: str, summary: str,
+    buttons: list[tuple[str, str]] | None = None,
+) -> None:
+    """Free text if her window is open, otherwise the nurse template. A
+    doomed send returns 200, so the window is checked, never inferred."""
+    if await window_open(wa_number):
+        if buttons:
+            await send_buttons(wa_number, body, buttons)
+        else:
+            await send_text(wa_number, body)
+    else:
+        await send_nurse_template(wa_number, patient, rid, summary)
+        print(f"[sweep] nurse window shut, template sent for #{rid}", flush=True)
+
+
+def _as_utc(ts):
+    """SQLite hands back naive datetimes; utcnow() is aware."""
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=utcnow().tzinfo)
+    return ts
 
 
 def _parse_id(payload: str) -> int | None:

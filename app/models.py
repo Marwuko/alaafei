@@ -77,6 +77,10 @@ class Referral(Base):
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Follow-ups after escalation: when the nurse was last reminded and how
+    # many times, so the sweep can space them out and eventually stop.
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reminder_count: Mapped[int] = mapped_column(default=0, server_default="0")
 
     nurse: Mapped[Nurse] = relationship(back_populates="referrals")
     facility: Mapped[Facility] = relationship()
