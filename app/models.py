@@ -97,6 +97,16 @@ class Referral(Base):
     household: Mapped[Household] = relationship()
 
 
+class MediaClip(Base):
+    """A WhatsApp media id for a clip in media/, with when it was uploaded.
+    Meta drops uploads after about 30 days, so this is a cache, not config."""
+    __tablename__ = "media_clips"
+
+    clip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    media_id: Mapped[str] = mapped_column(String(64))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class MessageLog(Base):
     __tablename__ = "message_log"
     # Every inbound WhatsApp message id lands here exactly once.

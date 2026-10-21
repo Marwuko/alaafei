@@ -1,16 +1,19 @@
-"""Check that every media id in VOICE_CLIPS is the clip its name says.
+"""Check that every stored media id is the clip its name says.
 
     python scripts/verify_clips.py            # compare Meta's copy of each id with media/<name>.ogg
     python scripts/verify_clips.py --play 2335xxxxxxx
                                               # send every clip to that number, each labelled
 
---check (the default) needs no phone: it downloads each media id from Meta
-and compares it byte for byte with the file of the same name in media/.
+--check (the default) needs no phone: it downloads each stored media id
+from Meta and compares it byte for byte with the file of the same name in
+media/. Ids are uploaded and refreshed by the service itself (app/media.py);
+a GONE here means run scripts/upload_clips.py or restart the service.
 A MATCH means the id plays whatever is in that file. Whether the file
 itself says what its name promises is the part only an ear can settle:
 --play sends the clips one by one, each preceded by "3/16 danger_signs_child
 (Dagbani), 65s", to a number that has written to Alaafei in the last 24h.
 """
+import asyncio
 import hashlib
 import sys
 import time
@@ -21,9 +24,10 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings  # noqa: E402
-from app.wa_client import GRAPH, VOICE_CLIPS  # noqa: E402
+from app.media import CLIPS, GRAPH, current_ids  # noqa: E402
 
 MEDIA = Path(__file__).resolve().parent.parent / "media"
+VOICE_CLIPS: dict[str, str] = {}  # filled from the database in main
 
 # What a listener should hear, so each clip can be ticked off against its
 # name and not just against "it played".
@@ -82,7 +86,7 @@ def check() -> int:
                 f"meta {len(remote):7d} B"
             )
     print(f"\n{len(VOICE_CLIPS) - bad} of {len(VOICE_CLIPS)} ids are the file their name says."
-          if bad == 0 else f"\n{bad} problem(s). Re-upload with scripts/upload_clips.py.")
+          if bad == 0 else f"\n{bad} problem(s). Run scripts/upload_clips.py, or restart the service.")
     return bad
 
 
@@ -120,6 +124,8 @@ def play(to: str) -> None:
 if __name__ == "__main__":
     if not settings.whatsapp_access_token:
         sys.exit("WHATSAPP_ACCESS_TOKEN is not set; run this on the box with .env")
+    stored = asyncio.run(current_ids())
+    VOICE_CLIPS.update({clip: stored[clip][0] if clip in stored else "" for clip in CLIPS})
     if len(sys.argv) == 3 and sys.argv[1] == "--play":
         play(sys.argv[2])
     elif len(sys.argv) == 1 or sys.argv[1] == "--check":

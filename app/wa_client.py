@@ -8,28 +8,12 @@ name; TTS is deliberately not used for caregiver-facing audio.
 import httpx
 
 from app.config import settings
+from app import media
 
 GRAPH = "https://graph.facebook.com/v20.0"
 
-# clip name -> uploaded media id (filled in after uploading Naomi's recordings)
-VOICE_CLIPS: dict[str, str] = {
-    "welcome": "2835447660157535",
-    "transport_reminder": "2300158304082115",
-    "danger_signs_pregnancy": "1583415133238627",
-    "danger_signs_child": "1388906453345789",
-    "arrival_thanks": "2522061161625087",
-    "gentle_nudge": "1543193877065027",
-    "feeding_6_23m": "1083919747695152",
-    "anc_reminder": "2243884623072950",
-    "welcome_en": "1623342495798409",
-    "transport_reminder_en": "1586146593177142",
-    "danger_signs_pregnancy_en": "27969055916108626",
-    "danger_signs_child_en": "1559679862861992",
-    "arrival_thanks_en": "1720349382544596",
-    "gentle_nudge_en": "28024960783824492",
-    "feeding_6_23m_en": "3070504789809648",
-    "anc_reminder_en": "25889003290796652",
-}
+# The clips themselves are files in media/; their WhatsApp media ids are
+# uploaded, cached and refreshed by app/media.py. See CLIPS there.
 
 
 async def send_text(to: str, body: str) -> bool:
@@ -55,13 +39,31 @@ async def send_text(to: str, body: str) -> bool:
     return True
 
 
-async def send_voice_note(to: str, clip: str) -> None:
-    media_id = VOICE_CLIPS.get(clip, "")
-    if not settings.whatsapp_access_token or not media_id:
+async def send_voice_note(to: str, clip: str) -> bool:
+    """Send a clip by name. The id comes from the media cache; if Meta says
+    it is no longer valid, upload the file again and retry once."""
+    if not settings.whatsapp_access_token:
         print(f"[DEV send_voice_note] to={to}: clip={clip}")
-        return
+        return True
+    media_id = await media.media_id_for(clip)
+    if not media_id:
+        print(f"[voice FAILED] to={to} clip={clip}: no media id", flush=True)
+        return False
+    r = await _post_audio(to, media_id)
+    if r.status_code != 200 and "media attachment ID" in r.text:
+        await media.forget(clip)
+        media_id = await media.upload(clip)
+        if media_id:
+            r = await _post_audio(to, media_id)
+    if r.status_code != 200 or "error" in r.text:
+        print(f"[voice FAILED] to={to} clip={clip} {r.status_code} {r.text[:200]}", flush=True)
+        return False
+    return True
+
+
+async def _post_audio(to: str, media_id: str) -> httpx.Response:
     async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(
+        return await client.post(
             f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
             headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
             json={
